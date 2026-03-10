@@ -53,36 +53,6 @@ The installer will:
 
 ---
 
-## Cloudflare Tunnel Setup (greybardserver.com)
-
-After running the installer with the Cloudflare option:
-
-```bash
-# 1. Authenticate with Cloudflare
-cloudflared tunnel login
-
-# 2. Create a tunnel
-cloudflared tunnel create shiftledger
-
-# 3. Route DNS
-cloudflared tunnel route dns shiftledger shifts.greybardserver.com
-
-# 4. Create /etc/cloudflared/config.yml
-tunnel: <TUNNEL_ID>
-credentials-file: /root/.cloudflared/<TUNNEL_ID>.json
-ingress:
-  - hostname: shifts.greybardserver.com
-    service: http://localhost:3000
-  - service: http_status:404
-
-# 5. Install and start as a service
-cloudflared service install
-systemctl start cloudflared
-```
-
-Access at `https://shifts.greybardserver.com` — HTTPS is handled automatically by Cloudflare.
-
----
 
 ## Configuration
 
