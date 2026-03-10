@@ -1,5 +1,5 @@
 ## Overview
-Implement a comprehensive security hardening initiative across code, infrastructure, and deployment processes. This is a high-level epic to identify, assess, and implement security best practices across all layers of the application.
+Implement a comprehensive security hardening initiative across code, infrastructure, and deployment processes. This is a high-level epic to identify, assess, and implement security best practices across all layers of the application. 
 
 ## Objectives
 - [ ] Conduct code security review and implement improvements
