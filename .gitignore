@@ -1,0 +1,6 @@
+node_modules/
+shifts.db
+shifts.db-wal
+shifts.db-shm
+backups/
+*.log

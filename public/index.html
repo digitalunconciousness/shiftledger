@@ -1,0 +1,999 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ShiftLedger</title>
+<link rel="manifest" href="/manifest.json">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=Syne:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+/* ── Theme Variables ── */
+[data-theme="dark"] {
+  --bg:#0a0a0a;--surface:#131313;--surface2:#1b1b1b;--border:#252525;
+  --amber:#f5a623;--amber-dim:#c47d0e;--amber-glow:#f5a62333;
+  --green:#3ecf8e;--red:#ff5e5e;--text:#e8e8e8;--text-dim:#888;--text-mute:#444;
+}
+[data-theme="light"] {
+  --bg:#f5f5f5;--surface:#ffffff;--surface2:#eaeaea;--border:#d0d0d0;
+  --amber:#d48a0a;--amber-dim:#b87608;--amber-glow:#d48a0a22;
+  --green:#1a9e5e;--red:#d43030;--text:#1a1a1a;--text-dim:#666;--text-mute:#aaa;
+}
+:root { --mono:'IBM Plex Mono',monospace;--sans:'Syne',sans-serif;--radius:6px;--radius-lg:12px; }
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{font-size:15px}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;overflow-x:hidden}
+
+/* ── Auth Screen ── */
+.auth-screen{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+.auth-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:36px;width:380px;max-width:95vw}
+.auth-logo{font-family:var(--mono);font-size:1.2rem;font-weight:600;letter-spacing:.12em;color:var(--amber);text-align:center;margin-bottom:24px;display:flex;align-items:center;justify-content:center;gap:10px}
+.auth-logo .logo-icon{width:26px;height:26px;border:2px solid var(--amber);display:flex;align-items:center;justify-content:center;font-size:.65rem;letter-spacing:0}
+.auth-title{font-size:1rem;font-weight:700;margin-bottom:16px;text-align:center}
+.auth-form{display:flex;flex-direction:column;gap:14px}
+.auth-form .btn-primary{width:100%;justify-content:center;margin-top:4px}
+
+/* ── Layout ── */
+.shell{display:none;grid-template-columns:220px 1fr;grid-template-rows:auto 1fr;min-height:100vh}
+.shell.active{display:grid}
+
+/* ── Topbar ── */
+.topbar{grid-column:1/-1;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 28px;height:56px;gap:12px;position:sticky;top:0;z-index:100}
+.logo{font-family:var(--mono);font-size:1.05rem;font-weight:600;letter-spacing:.12em;color:var(--amber);display:flex;align-items:center;gap:10px}
+.logo-icon{width:26px;height:26px;border:2px solid var(--amber);display:flex;align-items:center;justify-content:center;font-size:.65rem;letter-spacing:0}
+.topbar-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.topbar-date{font-family:var(--mono);font-size:.75rem;color:var(--text-dim)}
+.topbar-user{font-family:var(--mono);font-size:.78rem;display:flex;align-items:center;gap:6px}
+.user-dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+.hamburger{display:none;background:none;border:none;color:var(--text);cursor:pointer;padding:4px;font-size:1.3rem}
+
+/* ── Theme Toggle ── */
+.theme-toggle{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);width:32px;height:32px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text-dim);font-size:1rem;transition:.15s}
+.theme-toggle:hover{color:var(--amber)}
+
+/* ── Sidebar ── */
+.sidebar{background:var(--surface);border-right:1px solid var(--border);padding:24px 0;display:flex;flex-direction:column;gap:2px;position:sticky;top:56px;height:calc(100vh - 56px);overflow-y:auto}
+.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:149}
+.nav-section{padding:6px 20px 2px;font-size:.6rem;font-family:var(--mono);letter-spacing:.15em;color:var(--text-mute);text-transform:uppercase}
+.nav-item{display:flex;align-items:center;gap:10px;padding:10px 20px;font-size:.85rem;font-weight:500;color:var(--text-dim);cursor:pointer;border-left:2px solid transparent;transition:.15s;user-select:none}
+.nav-item:hover{color:var(--text);background:var(--surface2)}
+.nav-item.active{color:var(--amber);border-left-color:var(--amber);background:var(--amber-glow)}
+.nav-item svg{opacity:.7;flex-shrink:0}
+.nav-item.active svg{opacity:1}
+
+/* ── Main ── */
+.main{padding:32px 36px;overflow-y:auto;max-width:1200px}
+.view{display:none;animation:fadeIn .2s ease}
+.view.active{display:block}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.page-header{margin-bottom:28px}
+.page-title{font-size:1.6rem;font-weight:800;letter-spacing:-.02em}
+.page-sub{font-size:.8rem;color:var(--text-dim);font-family:var(--mono);margin-top:4px}
+
+/* ── Cards ── */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:24px}
+.card-label{font-size:.68rem;font-family:var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--text-dim);margin-bottom:8px}
+.card-value{font-family:var(--mono);font-size:1.9rem;font-weight:600;color:var(--text);line-height:1}
+.card-value.amber{color:var(--amber)}.card-value.green{color:var(--green)}
+.card-sub{font-size:.72rem;font-family:var(--mono);color:var(--text-mute);margin-top:6px}
+.card-compare{font-size:.7rem;font-family:var(--mono);margin-top:4px}
+.card-compare.up{color:var(--green)}.card-compare.down{color:var(--red)}
+
+/* ── Grids ── */
+.summary-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;margin-bottom:28px}
+
+/* ── Period Tabs ── */
+.period-tabs{display:flex;gap:4px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:3px;width:fit-content;margin-bottom:20px}
+.period-tab{padding:6px 14px;font-size:.78rem;font-family:var(--mono);font-weight:500;border-radius:calc(var(--radius) - 2px);cursor:pointer;color:var(--text-dim);border:none;background:transparent;transition:.15s}
+.period-tab:hover{color:var(--text)}
+.period-tab.active{background:var(--amber);color:#0a0a0a;font-weight:600}
+
+/* ── Filter Toggle ── */
+.filter-toggle{display:flex;gap:4px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:3px;width:fit-content}
+.filter-btn{padding:5px 12px;font-size:.75rem;font-family:var(--mono);border-radius:calc(var(--radius) - 2px);cursor:pointer;color:var(--text-dim);border:none;background:transparent;transition:.15s}
+.filter-btn.active{background:var(--amber);color:#0a0a0a;font-weight:600}
+
+/* ── Form ── */
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.form-group{display:flex;flex-direction:column;gap:6px}
+.form-group.full{grid-column:1/-1}
+label{font-size:.72rem;font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim)}
+input,select,textarea{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:var(--mono);font-size:.9rem;padding:10px 12px;width:100%;transition:.15s;outline:none;-webkit-appearance:none}
+input:focus,select:focus,textarea:focus{border-color:var(--amber);box-shadow:0 0 0 2px var(--amber-glow)}
+textarea{resize:vertical;min-height:80px}
+select option{background:var(--surface2)}
+
+/* ── Tip Toggle ── */
+.tip-toggle{display:grid;grid-template-columns:1fr 1fr;gap:0;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.tip-toggle label{display:flex;align-items:center;justify-content:center;gap:8px;padding:10px;cursor:pointer;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase;font-family:var(--mono);color:var(--text-dim);border:none;transition:.15s}
+.tip-toggle input[type="radio"]{display:none}
+.tip-toggle input[type="radio"]:checked+label{background:var(--amber);color:#0a0a0a;font-weight:600}
+
+/* ── Preview Box ── */
+.preview-box{background:var(--surface2);border:1px solid var(--amber-glow);border-radius:var(--radius);padding:16px;display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:8px}
+.preview-item .p-label{font-size:.65rem;font-family:var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--text-mute);margin-bottom:3px}
+.preview-item .p-val{font-family:var(--mono);font-size:1.25rem;font-weight:600}
+.preview-item .p-val.wages{color:var(--text-dim)}.preview-item .p-val.tips{color:#7ecee3}.preview-item .p-val.total{color:var(--amber)}
+
+/* ── Buttons ── */
+.btn{display:inline-flex;align-items:center;gap:8px;padding:11px 22px;border:none;border-radius:var(--radius);font-family:var(--sans);font-size:.88rem;font-weight:600;cursor:pointer;transition:.15s;white-space:nowrap}
+.btn-primary{background:var(--amber);color:#0a0a0a}
+.btn-primary:hover{background:#ffc04a;transform:translateY(-1px)}.btn-primary:active{transform:none}
+.btn-ghost{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border)}
+.btn-ghost:hover{color:var(--text);border-color:#444}
+.btn-danger{background:transparent;color:var(--red);border:1px solid #3a1a1a;padding:6px 12px;font-size:.8rem}
+.btn-danger:hover{background:#3a1a1a}
+.btn-sm{padding:6px 14px;font-size:.8rem}
+
+/* ── Toast ── */
+.toast-container{position:fixed;bottom:24px;right:24px;z-index:999;display:flex;flex-direction:column;gap:8px}
+.toast{background:var(--surface2);border:1px solid var(--border);border-left:3px solid var(--amber);border-radius:var(--radius);padding:12px 18px;font-size:.85rem;font-family:var(--mono);color:var(--text);animation:slideIn .2s ease;max-width:320px;display:flex;align-items:center;gap:10px}
+.toast.success{border-left-color:var(--green)}.toast.error{border-left-color:var(--red)}
+.toast .undo-btn{background:var(--amber);color:#0a0a0a;border:none;padding:3px 10px;border-radius:var(--radius);font-family:var(--mono);font-size:.75rem;font-weight:600;cursor:pointer}
+@keyframes slideIn{from{transform:translateX(20px);opacity:0}to{transform:none;opacity:1}}
+
+/* ── Table ── */
+.table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius-lg)}
+table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:.82rem}
+thead tr{background:var(--surface2)}
+th{padding:10px 14px;text-align:left;font-size:.65rem;letter-spacing:.12em;text-transform:uppercase;color:var(--text-dim);font-weight:500;white-space:nowrap;border-bottom:1px solid var(--border)}
+td{padding:11px 14px;border-bottom:1px solid var(--border);color:var(--text);white-space:nowrap}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--surface2)}
+.td-total{color:var(--amber);font-weight:600}
+.td-tips{color:#7ecee3}
+.td-notes{color:var(--text-dim);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ── Chart ── */
+.chart-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:24px;margin-bottom:24px}
+.chart-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px}
+.chart-title{font-size:.85rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-dim)}
+canvas{max-height:280px}
+
+/* ── Heatmap ── */
+.heatmap{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:24px}
+.heatmap-cell{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 8px;text-align:center}
+.heatmap-day{font-size:.65rem;font-family:var(--mono);color:var(--text-dim);text-transform:uppercase;margin-bottom:4px}
+.heatmap-val{font-family:var(--mono);font-size:1rem;font-weight:600}
+
+/* ── Progress Bar ── */
+.progress-wrap{background:var(--surface2);border-radius:var(--radius);height:24px;overflow:hidden;position:relative}
+.progress-bar{height:100%;background:var(--amber);border-radius:var(--radius);transition:width .5s ease}
+.progress-label{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:.75rem;font-weight:600;color:var(--text)}
+
+/* ── Modal ── */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;z-index:200}
+.modal-overlay.open{display:flex}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px;width:500px;max-width:95vw;max-height:90vh;overflow-y:auto;animation:fadeIn .15s ease}
+.modal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
+.modal-title{font-size:1rem;font-weight:700}
+.close-btn{background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:1.3rem;padding:2px 6px;border-radius:4px}
+.close-btn:hover{color:var(--text);background:var(--surface2)}
+.divider{height:1px;background:var(--border);margin:24px 0}
+.empty{padding:48px;text-align:center;color:var(--text-mute);font-family:var(--mono);font-size:.85rem}
+
+/* ── Shortcut Help ── */
+.shortcut-overlay{position:fixed;inset:0;background:rgba(0,0,0,.8);display:none;align-items:center;justify-content:center;z-index:300}
+.shortcut-overlay.open{display:flex}
+.shortcut-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px;width:400px;max-width:90vw}
+.shortcut-box h3{margin-bottom:16px;font-size:1rem}
+.shortcut-row{display:flex;justify-content:space-between;padding:6px 0;font-family:var(--mono);font-size:.82rem;border-bottom:1px solid var(--border)}
+.shortcut-row:last-child{border:none}
+.shortcut-key{background:var(--surface2);padding:2px 8px;border-radius:4px;font-size:.75rem}
+
+/* ── Settings ── */
+.user-card{display:flex;align-items:center;gap:12px;padding:14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:8px}
+.user-card .user-dot{width:14px;height:14px}
+.user-info{flex:1}
+.user-info strong{font-size:.9rem}
+.user-info small{font-family:var(--mono);font-size:.7rem;color:var(--text-dim);display:block;margin-top:2px}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#333;border-radius:99px}::-webkit-scrollbar-thumb:hover{background:#555}
+
+/* ── Responsive ── */
+@media(max-width:768px){
+  .shell.active{grid-template-columns:1fr}
+  .sidebar{position:fixed;left:-220px;height:100vh;top:0;z-index:150;transition:left .2s;padding-top:70px}
+  .sidebar.open{left:0}
+  .sidebar-overlay.open{display:block}
+  .hamburger{display:block}
+  .main{padding:20px 16px}
+  .form-grid{grid-template-columns:1fr}
+  .preview-box{grid-template-columns:1fr}
+  .summary-grid{grid-template-columns:1fr 1fr}
+  .heatmap{grid-template-columns:repeat(4,1fr)}
+}
+</style>
+</head>
+<body>
+
+<!-- ── AUTH SCREEN ── -->
+<div class="auth-screen" id="auth-screen" style="display:none">
+  <div class="auth-box">
+    <div class="auth-logo"><div class="logo-icon">$</div> SHIFTLEDGER</div>
+
+    <!-- Setup Form (first run) -->
+    <div id="setup-form" style="display:none">
+      <div class="auth-title">Create Admin Account</div>
+      <div class="auth-form">
+        <div class="form-group"><label>Username</label><input id="s-user" placeholder="admin"></div>
+        <div class="form-group"><label>Display Name</label><input id="s-name" placeholder="Your Name"></div>
+        <div class="form-group"><label>Password</label><input type="password" id="s-pass" placeholder="••••"></div>
+        <button class="btn btn-primary" onclick="doSetup()">Create Account</button>
+      </div>
+    </div>
+
+    <!-- Login Form -->
+    <div id="login-form" style="display:none">
+      <div class="auth-title">Sign In</div>
+      <div class="auth-form">
+        <div class="form-group"><label>Username</label><input id="l-user"></div>
+        <div class="form-group"><label>Password</label><input type="password" id="l-pass"></div>
+        <button class="btn btn-primary" onclick="doLogin()">Sign In</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── MAIN SHELL ── -->
+<div class="shell" id="app-shell">
+  <header class="topbar">
+    <button class="hamburger" id="hamburger-btn" onclick="toggleSidebar()">☰</button>
+    <div class="logo"><div class="logo-icon">$</div> SHIFTLEDGER</div>
+    <div class="topbar-right">
+      <span class="topbar-date" id="topbar-date"></span>
+      <div class="topbar-user" id="topbar-user"></div>
+      <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">◐</button>
+      <button class="btn btn-ghost btn-sm" onclick="doLogout()">Log out</button>
+    </div>
+  </header>
+
+  <div class="sidebar-overlay" id="sidebar-overlay" onclick="toggleSidebar()"></div>
+  <nav class="sidebar" id="sidebar">
+    <div class="nav-section">Main</div>
+    <div class="nav-item active" data-view="log" onclick="navigate(this)">
+      <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 5v14M5 12l7-7 7 7"/></svg>Log Shift
+    </div>
+    <div class="nav-item" data-view="dashboard" onclick="navigate(this)">
+      <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Dashboard
+    </div>
+    <div class="nav-section">Data</div>
+    <div class="nav-item" data-view="history" onclick="navigate(this)">
+      <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg>Shift History
+    </div>
+    <div class="nav-item" data-view="reports" onclick="navigate(this)">
+      <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/></svg>Reports
+    </div>
+    <div class="nav-section">Account</div>
+    <div class="nav-item" data-view="settings" onclick="navigate(this)">
+      <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>Settings
+    </div>
+  </nav>
+
+  <main class="main">
+
+    <!-- ── LOG SHIFT ── -->
+    <div class="view active" id="view-log">
+      <div class="page-header">
+        <h1 class="page-title">Log a Shift</h1>
+        <p class="page-sub">Record your earnings for the night</p>
+      </div>
+      <div class="card">
+        <!-- Template Loader -->
+        <div style="display:flex;gap:10px;align-items:flex-end;margin-bottom:16px;flex-wrap:wrap">
+          <div class="form-group" style="flex:1;min-width:180px"><label>Load Template</label>
+            <select id="f-template" onchange="loadTemplate()"><option value="">— Select Template —</option></select>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="saveAsTemplate()">Save as Template</button>
+        </div>
+        <div class="form-grid">
+          <div class="form-group"><label>Date</label><input type="date" id="f-date"></div>
+          <div class="form-group"><label>Job</label><select id="f-job" onchange="onJobChange()"><option value="">— No Job —</option></select></div>
+          <div class="form-group"><label>Hourly Rate ($)</label><input type="number" id="f-rate" placeholder="0.00" step="0.25" min="0" oninput="updatePreview()"></div>
+          <div class="form-group"><label>Hours Worked</label><input type="number" id="f-hours" placeholder="0.0" step="0.25" min="0" oninput="updatePreview()"></div>
+          <div class="form-group"><label>Tip Entry Mode</label>
+            <div class="tip-toggle">
+              <input type="radio" name="tip-mode" id="tm-total" value="total" checked onchange="updatePreview()"><label for="tm-total">Night Total</label>
+              <input type="radio" name="tip-mode" id="tm-per-hour" value="per_hour" onchange="updatePreview()"><label for="tm-per-hour">Per Hour</label>
+            </div>
+          </div>
+          <div class="form-group"><label id="tip-label">Total Tips for Night ($)</label><input type="number" id="f-tips" placeholder="0.00" step="0.01" min="0" oninput="updatePreview()"></div>
+          <div class="form-group full"><label>Earnings Preview</label>
+            <div class="preview-box">
+              <div class="preview-item"><div class="p-label">Wages</div><div class="p-val wages" id="prev-wages">$0.00</div></div>
+              <div class="preview-item"><div class="p-label">Tips</div><div class="p-val tips" id="prev-tips">$0.00</div></div>
+              <div class="preview-item"><div class="p-label">Grand Total</div><div class="p-val total" id="prev-total">$0.00</div></div>
+            </div>
+          </div>
+          <div class="form-group full"><label>Notes (optional)</label><textarea id="f-notes" placeholder="Busy Friday night, private party, etc."></textarea></div>
+        </div>
+        <div class="divider"></div>
+        <div style="display:flex;gap:10px"><button class="btn btn-primary" onclick="logShift()">Save Shift</button><button class="btn btn-ghost" onclick="clearForm()">Clear</button></div>
+      </div>
+    </div>
+
+    <!-- ── DASHBOARD ── -->
+    <div class="view" id="view-dashboard">
+      <div class="page-header" style="display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:12px">
+        <div><h1 class="page-title">Dashboard</h1><p class="page-sub">Your earnings at a glance</p></div>
+        <div class="filter-toggle" id="dash-filter"><button class="filter-btn active" onclick="setDashFilter(this,'')" data-uid="">All Shifts</button><button class="filter-btn" onclick="setDashFilter(this,'mine')" data-uid="mine">My Shifts</button></div>
+      </div>
+      <div class="summary-grid" id="summary-grid"></div>
+      <!-- Goals -->
+      <div id="goal-section" style="margin-bottom:24px"></div>
+      <!-- Heatmap -->
+      <div class="chart-card"><div class="chart-title" style="margin-bottom:12px">EARNINGS BY DAY OF WEEK</div><div class="heatmap" id="dow-heatmap"></div></div>
+      <!-- Trend Chart -->
+      <div class="chart-card">
+        <div class="chart-header">
+          <div class="chart-title">Earnings Trend</div>
+          <div class="period-tabs" id="trend-tabs">
+            <button class="period-tab" data-period="week" onclick="setTrendPeriod(this)">12 Weeks</button>
+            <button class="period-tab active" data-period="month" onclick="setTrendPeriod(this)">12 Months</button>
+            <button class="period-tab" data-period="year" onclick="setTrendPeriod(this)">3 Years</button>
+          </div>
+        </div>
+        <canvas id="trend-chart"></canvas>
+      </div>
+      <!-- Breakdown Chart -->
+      <div class="chart-card"><div class="chart-header"><div class="chart-title">Wages vs Tips Breakdown</div></div><canvas id="breakdown-chart" style="max-height:200px"></canvas></div>
+      <!-- Tip Ratio Chart -->
+      <div class="chart-card"><div class="chart-header"><div class="chart-title">Tip % of Total Earnings</div></div><canvas id="tipratio-chart" style="max-height:200px"></canvas></div>
+      <!-- Effective Rate Chart -->
+      <div class="chart-card"><div class="chart-header"><div class="chart-title">Effective Hourly Rate</div></div><canvas id="effrate-chart" style="max-height:200px"></canvas></div>
+      <!-- Overtime + Tax Cards -->
+      <div class="summary-grid" id="extra-cards"></div>
+    </div>
+
+    <!-- ── HISTORY ── -->
+    <div class="view" id="view-history">
+      <div class="page-header" style="display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:12px">
+        <div><h1 class="page-title">Shift History</h1><p class="page-sub">All recorded shifts</p></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <div class="filter-toggle"><button class="filter-btn active" onclick="setHistFilter(this,'')" data-uid="">All</button><button class="filter-btn" onclick="setHistFilter(this,'mine')" data-uid="mine">Mine</button></div>
+          <input type="date" id="hist-from" style="width:140px" onchange="loadHistory()">
+          <span style="color:var(--text-mute);font-family:var(--mono);font-size:.8rem">to</span>
+          <input type="date" id="hist-to" style="width:140px" onchange="loadHistory()">
+          <button class="btn btn-ghost btn-sm" onclick="clearHistoryFilter()">All</button>
+        </div>
+      </div>
+      <div class="table-wrap"><table><thead><tr>
+        <th></th><th>Date</th><th>Job</th><th>Hours</th><th>Rate</th><th>Wages</th><th>Tips/Hr</th><th>Tips</th><th>Total</th><th>Notes</th><th></th>
+      </tr></thead><tbody id="history-body"><tr><td colspan="11" class="empty">Loading...</td></tr></tbody></table></div>
+      <div id="history-totals" style="display:none;margin-top:12px">
+        <div class="card" style="display:flex;gap:28px;flex-wrap:wrap;padding:14px 20px">
+          <div><div class="card-label">Shifts</div><div style="font-family:var(--mono);font-weight:600" id="ht-shifts">—</div></div>
+          <div><div class="card-label">Hours</div><div style="font-family:var(--mono);font-weight:600" id="ht-hours">—</div></div>
+          <div><div class="card-label">Wages</div><div style="font-family:var(--mono);font-weight:600" id="ht-wages">—</div></div>
+          <div><div class="card-label">Tips</div><div style="font-family:var(--mono);font-weight:600" id="ht-tips">—</div></div>
+          <div><div class="card-label">Grand Total</div><div style="font-family:var(--mono);font-weight:600;color:var(--amber)" id="ht-total">—</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── REPORTS ── -->
+    <div class="view" id="view-reports">
+      <div class="page-header"><h1 class="page-title">Reports</h1><p class="page-sub">Export earnings summaries</p></div>
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-label" style="margin-bottom:12px">Quick Exports (PDF)</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-ghost" onclick="quickExport('week')">This Week</button>
+          <button class="btn btn-ghost" onclick="quickExport('last_week')">Last Week</button>
+          <button class="btn btn-ghost" onclick="quickExport('biweekly')">14 Days</button>
+          <button class="btn btn-ghost" onclick="quickExport('month')">This Month</button>
+          <button class="btn btn-ghost" onclick="quickExport('ytd')">YTD</button>
+          <button class="btn btn-ghost" onclick="quickExport('all')">All Time</button>
+        </div>
+      </div>
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-label" style="margin-bottom:12px">Custom Date Range</div>
+        <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px">
+          <div class="form-group"><label>From</label><input type="date" id="r-from" style="width:160px"></div>
+          <div class="form-group"><label>To</label><input type="date" id="r-to" style="width:160px"></div>
+          <div class="form-group"><label>Title</label><input id="r-title" placeholder="My Report" style="width:200px"></div>
+        </div>
+        <div style="display:flex;gap:10px"><button class="btn btn-primary" onclick="customExport()">Export PDF</button><button class="btn btn-ghost" onclick="customCSVExport()">Export CSV</button></div>
+      </div>
+      <div class="card">
+        <div class="card-label" style="margin-bottom:12px">Import CSV</div>
+        <p style="font-family:var(--mono);font-size:.78rem;color:var(--text-dim);margin-bottom:12px">Format: Date,Job,User,Hours,Rate,Wages,Tips/Hr,Total Tips,Grand Total,Tip Mode,Notes</p>
+        <input type="file" id="csv-file" accept=".csv" style="margin-bottom:12px">
+        <button class="btn btn-ghost" onclick="importCSV()">Import</button>
+      </div>
+    </div>
+
+    <!-- ── SETTINGS ── -->
+    <div class="view" id="view-settings">
+      <div class="page-header"><h1 class="page-title">Settings</h1><p class="page-sub">Account & administration</p></div>
+      <!-- My Profile -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-label" style="margin-bottom:12px">My Profile</div>
+        <div class="form-grid">
+          <div class="form-group"><label>Display Name</label><input id="set-name"></div>
+          <div class="form-group"><label>Color</label><input type="color" id="set-color" style="height:42px;padding:4px"></div>
+          <div class="form-group"><label>New Password</label><input type="password" id="set-pass" placeholder="Leave blank to keep current"></div>
+          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="saveProfile()">Save Profile</button></div>
+        </div>
+      </div>
+      <!-- Admin: Manage Users -->
+      <div id="admin-section" style="display:none">
+        <div class="card" style="margin-bottom:20px">
+          <div class="card-label" style="margin-bottom:12px">Manage Users (Admin)</div>
+          <div id="users-list"></div>
+          <div class="divider"></div>
+          <div class="card-label" style="margin-bottom:12px">Add New User</div>
+          <div class="form-grid">
+            <div class="form-group"><label>Username</label><input id="nu-user"></div>
+            <div class="form-group"><label>Display Name</label><input id="nu-name"></div>
+            <div class="form-group"><label>Password</label><input type="password" id="nu-pass"></div>
+            <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addUser()">Add User</button></div>
+          </div>
+        </div>
+        <!-- Manage Jobs -->
+        <div class="card" style="margin-bottom:20px">
+          <div class="card-label" style="margin-bottom:12px">Manage Jobs</div>
+          <div id="jobs-list"></div>
+          <div class="divider"></div>
+          <div class="form-grid">
+            <div class="form-group"><label>Job Name</label><input id="nj-name"></div>
+            <div class="form-group"><label>Default Rate</label><input type="number" id="nj-rate" step="0.25" min="0" placeholder="0.00"></div>
+            <div class="form-group"><label>Color</label><input type="color" id="nj-color" value="#f5a623" style="height:42px;padding:4px"></div>
+            <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addJob()">Add Job</button></div>
+          </div>
+        </div>
+        <!-- Goals -->
+        <div class="card">
+          <div class="card-label" style="margin-bottom:12px">Goals</div>
+          <div id="goals-list"></div>
+          <div class="divider"></div>
+          <div class="form-grid">
+            <div class="form-group"><label>Period</label><select id="ng-period"><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></div>
+            <div class="form-group"><label>Target ($)</label><input type="number" id="ng-amount" step="1" min="0" placeholder="500"></div>
+            <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addGoal()">Add Goal</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Edit Modal -->
+<div class="modal-overlay" id="edit-modal">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">Edit Shift</span><button class="close-btn" onclick="closeEditModal()">×</button></div>
+    <div class="form-grid">
+      <input type="hidden" id="e-id">
+      <div class="form-group"><label>Date</label><input type="date" id="e-date"></div>
+      <div class="form-group"><label>Job</label><select id="e-job"></select></div>
+      <div class="form-group"><label>Hourly Rate ($)</label><input type="number" id="e-rate" step="0.25" min="0"></div>
+      <div class="form-group"><label>Hours Worked</label><input type="number" id="e-hours" step="0.25" min="0"></div>
+      <div class="form-group"><label>Tip Mode</label><select id="e-tipmode"><option value="total">Night Total</option><option value="per_hour">Per Hour</option></select></div>
+      <div class="form-group"><label>Tip Amount ($)</label><input type="number" id="e-tips" step="0.01" min="0"></div>
+      <div class="form-group full"><label>Notes</label><textarea id="e-notes"></textarea></div>
+    </div>
+    <div class="divider"></div>
+    <div style="display:flex;gap:10px"><button class="btn btn-primary" onclick="saveEdit()">Save</button><button class="btn btn-ghost" onclick="closeEditModal()">Cancel</button></div>
+  </div>
+</div>
+
+<!-- Shortcut Help -->
+<div class="shortcut-overlay" id="shortcut-overlay" onclick="this.classList.remove('open')">
+  <div class="shortcut-box" onclick="event.stopPropagation()">
+    <h3>Keyboard Shortcuts</h3>
+    <div class="shortcut-row"><span>Log Shift</span><span class="shortcut-key">1</span></div>
+    <div class="shortcut-row"><span>Dashboard</span><span class="shortcut-key">2</span></div>
+    <div class="shortcut-row"><span>History</span><span class="shortcut-key">3</span></div>
+    <div class="shortcut-row"><span>Reports</span><span class="shortcut-key">4</span></div>
+    <div class="shortcut-row"><span>Settings</span><span class="shortcut-key">5</span></div>
+    <div class="shortcut-row"><span>Save Shift</span><span class="shortcut-key">Ctrl+Enter</span></div>
+    <div class="shortcut-row"><span>Close Modal</span><span class="shortcut-key">Esc</span></div>
+    <div class="shortcut-row"><span>This Help</span><span class="shortcut-key">?</span></div>
+  </div>
+</div>
+
+<div class="toast-container" id="toasts"></div>
+
+<script>
+// ── State ──
+let currentUser = null;
+let trendChart=null,breakdownChart=null,tipRatioChart=null,effRateChart=null;
+let currentPeriod='month';
+let dashFilterUser='';
+let histFilterUser='';
+let jobsCache=[];
+let templatesCache=[];
+
+// ── Init ──
+document.addEventListener('DOMContentLoaded',()=>{
+  // Restore theme
+  const saved=localStorage.getItem('sl_theme');
+  if(saved) document.documentElement.dataset.theme=saved;
+  checkAuth();
+});
+
+async function checkAuth(){
+  const res=await fetch('/api/auth/status');
+  const data=await res.json();
+  if(data.status==='setup'){showAuth('setup');return}
+  if(data.status==='login'){showAuth('login');return}
+  currentUser=data.user;
+  enterApp();
+}
+
+function showAuth(mode){
+  document.getElementById('auth-screen').style.display='flex';
+  document.getElementById('app-shell').classList.remove('active');
+  document.getElementById('setup-form').style.display=mode==='setup'?'block':'none';
+  document.getElementById('login-form').style.display=mode==='login'?'block':'none';
+}
+
+async function doSetup(){
+  const body={username:gv('s-user'),display_name:gv('s-name'),password:gv('s-pass')};
+  if(!body.username||!body.display_name||!body.password){toast('Fill all fields','error');return}
+  const res=await fetch('/api/auth/setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const data=await res.json();
+  if(!res.ok){toast(data.error,'error');return}
+  currentUser=data.user;
+  enterApp();
+}
+
+async function doLogin(){
+  const body={username:gv('l-user'),password:gv('l-pass')};
+  const res=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const data=await res.json();
+  if(!res.ok){toast(data.error||'Login failed','error');return}
+  currentUser=data.user;
+  enterApp();
+}
+
+async function doLogout(){
+  await fetch('/api/auth/logout',{method:'POST'});
+  currentUser=null;
+  showAuth('login');
+}
+
+function enterApp(){
+  document.getElementById('auth-screen').style.display='none';
+  document.getElementById('app-shell').classList.add('active');
+  document.getElementById('topbar-date').textContent=new Date().toLocaleDateString('en-US',{weekday:'short',year:'numeric',month:'short',day:'numeric'});
+  document.getElementById('topbar-user').innerHTML=`<span class="user-dot" style="background:${currentUser.color}"></span>${esc(currentUser.display_name)}`;
+  document.getElementById('f-date').value=today();
+  if(currentUser.is_admin) document.getElementById('admin-section').style.display='block';
+  loadJobs();loadTemplates();
+  // tip mode label
+  document.querySelectorAll('input[name="tip-mode"]').forEach(r=>r.addEventListener('change',()=>{
+    document.getElementById('tip-label').textContent=r.value==='per_hour'?'Tips Per Hour ($)':'Total Tips for Night ($)';
+  }));
+}
+
+// ── Helpers ──
+function gv(id){return document.getElementById(id).value.trim()}
+function sv(id,v){document.getElementById(id).value=v}
+function today(){return new Date().toISOString().split('T')[0]}
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+function $(id){return document.getElementById(id)}
+
+// ── Navigation ──
+const viewKeys=['log','dashboard','history','reports','settings'];
+function navigate(el){
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  el.classList.add('active');
+  const view=el.dataset.view;
+  $('view-'+view).classList.add('active');
+  if(view==='dashboard')loadDashboard();
+  if(view==='history')loadHistory();
+  if(view==='settings')loadSettings();
+  // Close mobile sidebar
+  $('sidebar').classList.remove('open');
+  $('sidebar-overlay').classList.remove('open');
+}
+
+function toggleSidebar(){
+  $('sidebar').classList.toggle('open');
+  $('sidebar-overlay').classList.toggle('open');
+}
+
+// ── Theme ──
+function toggleTheme(){
+  const t=document.documentElement.dataset.theme==='dark'?'light':'dark';
+  document.documentElement.dataset.theme=t;
+  localStorage.setItem('sl_theme',t);
+}
+
+// ── Preview ──
+function updatePreview(){
+  const rate=parseFloat(gv('f-rate'))||0,hours=parseFloat(gv('f-hours'))||0,tips=parseFloat(gv('f-tips'))||0;
+  const mode=document.querySelector('input[name="tip-mode"]:checked').value;
+  const wages=rate*hours,totalTips=mode==='per_hour'?tips*hours:tips,grand=wages+totalTips;
+  $('prev-wages').textContent='$'+wages.toFixed(2);
+  $('prev-tips').textContent='$'+totalTips.toFixed(2);
+  $('prev-total').textContent='$'+grand.toFixed(2);
+}
+
+// ── Jobs ──
+async function loadJobs(){
+  jobsCache=await fetch('/api/jobs').then(r=>r.json());
+  const opts='<option value="">— No Job —</option>'+jobsCache.filter(j=>!j.archived).map(j=>`<option value="${j.id}">${esc(j.name)}</option>`).join('');
+  $('f-job').innerHTML=opts;
+  $('e-job').innerHTML=opts;
+}
+
+function onJobChange(){
+  const id=parseInt(gv('f-job'));
+  const job=jobsCache.find(j=>j.id===id);
+  if(job&&job.default_rate) sv('f-rate',job.default_rate);
+  updatePreview();
+}
+
+// ── Templates ──
+async function loadTemplates(){
+  templatesCache=await fetch('/api/templates').then(r=>r.json());
+  const opts='<option value="">— Select Template —</option>'+templatesCache.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('');
+  $('f-template').innerHTML=opts;
+}
+
+function loadTemplate(){
+  const id=parseInt(gv('f-template'));
+  const t=templatesCache.find(x=>x.id===id);
+  if(!t)return;
+  if(t.job_id)sv('f-job',t.job_id);
+  sv('f-rate',t.hourly_rate);sv('f-hours',t.hours_worked);
+  if(t.tip_mode==='per_hour')$('tm-per-hour').checked=true;else $('tm-total').checked=true;
+  sv('f-tips',t.tip_input);sv('f-notes',t.notes||'');
+  $('tip-label').textContent=t.tip_mode==='per_hour'?'Tips Per Hour ($)':'Total Tips for Night ($)';
+  updatePreview();
+}
+
+async function saveAsTemplate(){
+  const name=prompt('Template name:');if(!name)return;
+  const body={name,job_id:parseInt(gv('f-job'))||null,hourly_rate:parseFloat(gv('f-rate'))||0,hours_worked:parseFloat(gv('f-hours'))||0,tip_mode:document.querySelector('input[name="tip-mode"]:checked').value,tip_input:parseFloat(gv('f-tips'))||0,notes:gv('f-notes')};
+  await fetch('/api/templates',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  toast('Template saved','success');loadTemplates();
+}
+
+// ── Log Shift ──
+async function logShift(){
+  const body={date:gv('f-date'),hourly_rate:parseFloat(gv('f-rate')),hours_worked:parseFloat(gv('f-hours')),tip_mode:document.querySelector('input[name="tip-mode"]:checked').value,tip_input:parseFloat(gv('f-tips')),notes:gv('f-notes'),job_id:parseInt(gv('f-job'))||null};
+  if(!body.date||isNaN(body.hourly_rate)||isNaN(body.hours_worked)||isNaN(body.tip_input)){toast('Fill required fields','error');return}
+  const res=await fetch('/api/shifts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const data=await res.json();
+  if(!res.ok){toast(data.error||'Error','error');return}
+  toast(`Shift saved! Total: $${data.grand_total.toFixed(2)}`,'success');
+  clearForm();
+}
+
+function clearForm(){
+  sv('f-date',today());sv('f-rate','');sv('f-hours','');sv('f-tips','');sv('f-notes','');sv('f-job','');sv('f-template','');
+  $('tm-total').checked=true;$('tip-label').textContent='Total Tips for Night ($)';
+  updatePreview();
+}
+
+// ── Dashboard ──
+function setDashFilter(el,uid){
+  document.querySelectorAll('#dash-filter .filter-btn').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');
+  dashFilterUser=uid==='mine'?currentUser.id:'';
+  loadDashboard();
+}
+
+async function loadDashboard(){
+  const qs=dashFilterUser?`?user_id=${dashFilterUser}`:'';
+  const[sumRes,trendRes,dowRes,tipRes,otRes,taxRes,goalsRes]=await Promise.all([
+    fetch('/api/summary'+qs),fetch('/api/trends?period='+currentPeriod),
+    fetch('/api/analytics/effective-rate'),fetch('/api/analytics/tip-ratio'),
+    fetch('/api/overtime'),fetch('/api/tax-estimate?period=ytd'),fetch('/api/goals')
+  ]);
+  const[summary,trends,dow,tipRatio,overtime,tax,goals]=await Promise.all([sumRes.json(),trendRes.json(),dowRes.json(),tipRes.json(),otRes.json(),taxRes.json(),goalsRes.json()]);
+  renderSummaryCards(summary);renderHeatmap(dow);renderTrendChart(trends);renderBreakdownChart(trends);renderTipRatioChart(tipRatio);renderEffRateChart(trends);renderExtraCards(overtime,tax);renderGoals(goals,summary);
+}
+
+function renderSummaryCards(s){
+  const periods=[
+    {key:'this_week',label:'This Week',cmp:'last_week',cmpLabel:'vs Last Week'},
+    {key:'last_week',label:'Last Week'},
+    {key:'biweekly',label:'Last 14 Days'},
+    {key:'this_month',label:'This Month',cmp:'last_month',cmpLabel:'vs Last Month'},
+    {key:'ytd',label:'Year to Date'},
+    {key:'all_time',label:'All Time'},
+  ];
+  $('summary-grid').innerHTML=periods.map(p=>{
+    const d=s[p.key];
+    let cmpHtml='';
+    if(p.cmp&&s[p.cmp]){
+      const prev=s[p.cmp].grand_total;
+      if(prev>0){
+        const diff=d.grand_total-prev;
+        const pct=((diff/prev)*100).toFixed(1);
+        const cls=diff>=0?'up':'down';
+        const arrow=diff>=0?'↑':'↓';
+        cmpHtml=`<div class="card-compare ${cls}">${arrow} ${Math.abs(pct)}% ${p.cmpLabel}</div>`;
+      }
+    }
+    const avgTph=d.avg_tips_per_hour?'$'+parseFloat(d.avg_tips_per_hour).toFixed(2)+'/hr tips':'';
+    return `<div class="card"><div class="card-label">${p.label}</div><div class="card-value ${p.key==='this_month'?'amber':''}">$${d.grand_total.toFixed(2)}</div><div class="card-sub">${d.shifts} shift${d.shifts!==1?'s':''} · ${d.total_hours.toFixed(1)} hrs${avgTph?' · '+avgTph:''}</div>${cmpHtml}</div>`;
+  }).join('');
+}
+
+function renderHeatmap(dow){
+  const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const map={};dow.forEach(d=>{map[d.dow]=d});
+  const vals=dow.map(d=>d.avg_effective_rate||0);
+  const max=Math.max(...vals,1);
+  $('dow-heatmap').innerHTML=days.map((d,i)=>{
+    const v=map[i];
+    const rate=v?v.avg_effective_rate:0;
+    const count=v?v.shift_count:0;
+    const intensity=rate/max;
+    const bg=`rgba(245,166,35,${(intensity*0.6+0.05).toFixed(2)})`;
+    return `<div class="heatmap-cell" style="background:${bg}"><div class="heatmap-day">${d}</div><div class="heatmap-val">$${rate?rate.toFixed(2):'—'}</div><div style="font-size:.6rem;font-family:var(--mono);color:var(--text-mute)">${count} shifts</div></div>`;
+  }).join('');
+}
+
+function renderGoals(goals,summary){
+  const active=goals.filter(g=>g.active);
+  if(!active.length){$('goal-section').innerHTML='';return}
+  $('goal-section').innerHTML=active.map(g=>{
+    const key=g.period==='weekly'?'this_week':'this_month';
+    const current=summary[key]?summary[key].grand_total:0;
+    const pct=Math.min(100,Math.round(current/g.target_amount*100));
+    return `<div class="card" style="margin-bottom:12px"><div class="card-label">${g.period} Goal — $${g.target_amount.toFixed(0)}</div><div class="progress-wrap"><div class="progress-bar" style="width:${pct}%"></div><div class="progress-label">$${current.toFixed(2)} / $${g.target_amount.toFixed(0)} (${pct}%)</div></div></div>`;
+  }).join('');
+}
+
+function renderExtraCards(ot,tax){
+  let html='';
+  if(ot.is_overtime) html+=`<div class="card"><div class="card-label">⚠ Overtime This Week</div><div class="card-value">${ot.overtime_hours.toFixed(1)} hrs</div><div class="card-sub">${ot.total_hours.toFixed(1)} total · ${ot.threshold}hr threshold · ${ot.multiplier}x rate</div></div>`;
+  else html+=`<div class="card"><div class="card-label">Weekly Hours</div><div class="card-value">${ot.total_hours.toFixed(1)} hrs</div><div class="card-sub">${ot.threshold - ot.total_hours > 0 ? (ot.threshold - ot.total_hours).toFixed(1)+' hrs until OT' : 'At threshold'}</div></div>`;
+  html+=`<div class="card"><div class="card-label">Est. Taxes (YTD)</div><div class="card-value">$${tax.est_total_tax.toFixed(2)}</div><div class="card-sub">Wage tax: $${tax.est_wage_tax.toFixed(2)} · Tip tax: $${tax.est_tip_tax.toFixed(2)}</div></div>`;
+  $('extra-cards').innerHTML=html;
+}
+
+function setTrendPeriod(el){
+  document.querySelectorAll('#trend-tabs .period-tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');currentPeriod=el.dataset.period;
+  fetch('/api/trends?period='+currentPeriod).then(r=>r.json()).then(data=>{renderTrendChart(data);renderBreakdownChart(data);renderEffRateChart(data)});
+}
+
+function chartColors(){
+  const t=document.documentElement.dataset.theme;
+  return{grid:t==='dark'?'#1a1a1a':'#e0e0e0',tick:t==='dark'?'#666':'#999',legend:t==='dark'?'#888':'#666',tooltip:{bg:t==='dark'?'#1b1b1b':'#fff',border:t==='dark'?'#333':'#ccc',title:t==='dark'?'#888':'#666',body:t==='dark'?'#e8e8e8':'#222'}};
+}
+
+function formatLabels(data){
+  return data.map(d=>{
+    if(d.period.includes('W')){const[,wk]=d.period.split('-W');return'W'+wk}
+    const[y,m]=d.period.split('-');return new Date(y,m-1).toLocaleDateString('en-US',{month:'short',year:'2-digit'});
+  });
+}
+
+function renderTrendChart(data){
+  const ctx=$('trend-chart').getContext('2d');if(trendChart)trendChart.destroy();
+  const c=chartColors();
+  trendChart=new Chart(ctx,{type:'bar',data:{labels:formatLabels(data),datasets:[
+    {label:'Wages',data:data.map(d=>d.total_wages),backgroundColor:'#2a2a2a',borderColor:'#444',borderWidth:1,borderRadius:3},
+    {label:'Tips',data:data.map(d=>d.total_tips),backgroundColor:'#1c3a44',borderColor:'#7ecee3',borderWidth:1,borderRadius:3},
+    {label:'Total',data:data.map(d=>d.grand_total),type:'line',borderColor:'#f5a623',backgroundColor:'transparent',borderWidth:2,pointBackgroundColor:'#f5a623',pointRadius:3,tension:.3}
+  ]},options:{responsive:true,plugins:{legend:{labels:{color:c.legend,font:{family:'IBM Plex Mono',size:11},boxWidth:12}},tooltip:{backgroundColor:c.tooltip.bg,borderColor:c.tooltip.border,borderWidth:1,titleColor:c.tooltip.title,bodyColor:c.tooltip.body,callbacks:{label:ctx=>` ${ctx.dataset.label}: $${parseFloat(ctx.raw).toFixed(2)}`}}},scales:{x:{ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10}},grid:{color:c.grid}},y:{ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10},callback:v=>'$'+v.toLocaleString()},grid:{color:c.grid}}}}});
+}
+
+function renderBreakdownChart(data){
+  const ctx=$('breakdown-chart').getContext('2d');if(breakdownChart)breakdownChart.destroy();const c=chartColors();
+  breakdownChart=new Chart(ctx,{type:'bar',data:{labels:formatLabels(data),datasets:[
+    {label:'Wages',data:data.map(d=>d.total_wages),backgroundColor:'#2e2e2e',borderRadius:2},
+    {label:'Tips',data:data.map(d=>d.total_tips),backgroundColor:'#1c3a44',borderRadius:2}
+  ]},options:{responsive:true,plugins:{legend:{labels:{color:c.legend,font:{family:'IBM Plex Mono',size:11},boxWidth:12}},tooltip:{backgroundColor:c.tooltip.bg,borderColor:c.tooltip.border,borderWidth:1,titleColor:c.tooltip.title,bodyColor:c.tooltip.body,callbacks:{label:ctx=>` ${ctx.dataset.label}: $${parseFloat(ctx.raw).toFixed(2)}`}}},scales:{x:{stacked:true,ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10}},grid:{color:c.grid}},y:{stacked:true,ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10},callback:v=>'$'+v.toLocaleString()},grid:{color:c.grid}}}}});
+}
+
+function renderTipRatioChart(data){
+  const ctx=$('tipratio-chart').getContext('2d');if(tipRatioChart)tipRatioChart.destroy();const c=chartColors();
+  tipRatioChart=new Chart(ctx,{type:'line',data:{labels:data.map(d=>{const[y,m]=d.period.split('-');return new Date(y,m-1).toLocaleDateString('en-US',{month:'short',year:'2-digit'})}),datasets:[{label:'Tip %',data:data.map(d=>d.tip_pct),borderColor:'#7ecee3',backgroundColor:'rgba(126,206,227,0.1)',fill:true,borderWidth:2,pointRadius:3,tension:.3}]},options:{responsive:true,plugins:{legend:{labels:{color:c.legend,font:{family:'IBM Plex Mono',size:11},boxWidth:12}},tooltip:{backgroundColor:c.tooltip.bg,borderColor:c.tooltip.border,borderWidth:1,titleColor:c.tooltip.title,bodyColor:c.tooltip.body,callbacks:{label:ctx=>` ${ctx.raw}%`}}},scales:{x:{ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10}},grid:{color:c.grid}},y:{ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10},callback:v=>v+'%'},grid:{color:c.grid}}}}});
+}
+
+function renderEffRateChart(data){
+  const ctx=$('effrate-chart').getContext('2d');if(effRateChart)effRateChart.destroy();const c=chartColors();
+  effRateChart=new Chart(ctx,{type:'line',data:{labels:formatLabels(data),datasets:[{label:'Effective $/Hr',data:data.map(d=>d.effective_rate),borderColor:'#3ecf8e',backgroundColor:'rgba(62,207,142,0.1)',fill:true,borderWidth:2,pointRadius:3,tension:.3}]},options:{responsive:true,plugins:{legend:{labels:{color:c.legend,font:{family:'IBM Plex Mono',size:11},boxWidth:12}},tooltip:{backgroundColor:c.tooltip.bg,borderColor:c.tooltip.border,borderWidth:1,titleColor:c.tooltip.title,bodyColor:c.tooltip.body,callbacks:{label:ctx=>` $${parseFloat(ctx.raw).toFixed(2)}/hr`}}},scales:{x:{ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10}},grid:{color:c.grid}},y:{ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10},callback:v=>'$'+v},grid:{color:c.grid}}}}});
+}
+
+// ── History ──
+function setHistFilter(el,uid){
+  el.parentElement.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');
+  histFilterUser=uid==='mine'?currentUser.id:'';
+  loadHistory();
+}
+
+async function loadHistory(){
+  const from=gv('hist-from'),to=gv('hist-to');
+  let url='/api/shifts?';
+  if(from&&to)url+=`from=${from}&to=${to}&`;else if(from)url+=`from=${from}&`;
+  if(histFilterUser)url+=`user_id=${histFilterUser}&`;
+  const shifts=await fetch(url).then(r=>r.json());
+  const tbody=$('history-body');
+  if(!shifts.length){tbody.innerHTML='<tr><td colspan="11" class="empty">No shifts found.</td></tr>';$('history-totals').style.display='none';return}
+  let totH=0,totW=0,totT=0,totG=0;
+  tbody.innerHTML=shifts.map(s=>{
+    totH+=s.hours_worked;totW+=s.wage_total;totT+=s.total_tips;totG+=s.grand_total;
+    const tph=s.hours_worked>0?(s.total_tips/s.hours_worked).toFixed(2):'0.00';
+    const canEdit=currentUser&&(s.user_id===currentUser.id||currentUser.is_admin);
+    const dot=s.user_color?`<span class="user-dot" style="background:${s.user_color}" title="${esc(s.user_name||'')}"></span>`:'';
+    return `<tr>
+      <td>${dot}</td><td>${s.date}</td><td>${esc(s.job_name||'—')}</td>
+      <td>${s.hours_worked.toFixed(2)}</td><td>$${s.hourly_rate.toFixed(2)}</td>
+      <td>$${s.wage_total.toFixed(2)}</td><td class="td-tips">$${tph}</td><td class="td-tips">$${s.total_tips.toFixed(2)}</td>
+      <td class="td-total">$${s.grand_total.toFixed(2)}</td><td class="td-notes" title="${esc(s.notes||'')}">${esc(s.notes||'—')}</td>
+      <td style="display:flex;gap:6px">${canEdit?`<button class="btn btn-ghost btn-sm" onclick='openEditModal(${JSON.stringify(s).replace(/'/g,"&#39;")})'>Edit</button><button class="btn btn-danger" onclick="deleteShift(${s.id})">Del</button>`:''}</td>
+    </tr>`;
+  }).join('');
+  $('history-totals').style.display='block';
+  $('ht-shifts').textContent=shifts.length;$('ht-hours').textContent=totH.toFixed(2)+' hrs';
+  $('ht-wages').textContent='$'+totW.toFixed(2);$('ht-tips').textContent='$'+totT.toFixed(2);$('ht-total').textContent='$'+totG.toFixed(2);
+}
+
+function clearHistoryFilter(){sv('hist-from','');sv('hist-to','');loadHistory()}
+
+async function deleteShift(id){
+  await fetch('/api/shifts/'+id,{method:'DELETE'});
+  const el=document.createElement('div');el.className='toast success';
+  el.innerHTML='Shift deleted. <button class="undo-btn" onclick="restoreShift('+id+',this)">Undo</button>';
+  $('toasts').appendChild(el);setTimeout(()=>el.remove(),5000);
+  loadHistory();
+}
+
+async function restoreShift(id,btn){
+  await fetch('/api/shifts/'+id+'/restore',{method:'POST'});
+  btn.parentElement.remove();toast('Shift restored','success');loadHistory();
+}
+
+// ── Edit Modal ──
+function openEditModal(s){
+  sv('e-id',s.id);sv('e-date',s.date);sv('e-rate',s.hourly_rate);sv('e-hours',s.hours_worked);
+  sv('e-tipmode',s.tip_mode);sv('e-tips',s.tip_input);sv('e-notes',s.notes||'');
+  sv('e-job',s.job_id||'');
+  $('edit-modal').classList.add('open');
+}
+function closeEditModal(){$('edit-modal').classList.remove('open')}
+$('edit-modal').addEventListener('click',function(e){if(e.target===this)closeEditModal()});
+
+async function saveEdit(){
+  const body={date:gv('e-date'),hourly_rate:parseFloat(gv('e-rate')),hours_worked:parseFloat(gv('e-hours')),tip_mode:gv('e-tipmode'),tip_input:parseFloat(gv('e-tips')),notes:gv('e-notes'),job_id:parseInt(gv('e-job'))||null};
+  const res=await fetch('/api/shifts/'+gv('e-id'),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(res.ok){toast('Shift updated','success');closeEditModal();loadHistory()}else{const d=await res.json();toast(d.error||'Error','error')}
+}
+
+// ── Reports ──
+function getPeriodDates(key){
+  const now=new Date(),fmt=d=>d.toISOString().split('T')[0],dow=now.getDay()||7;
+  const ws=new Date(now);ws.setDate(now.getDate()-dow+1);
+  const lwe=new Date(ws);lwe.setDate(lwe.getDate()-1);const lws=new Date(lwe);lws.setDate(lwe.getDate()-6);
+  const bw=new Date(now);bw.setDate(now.getDate()-13);const ms=new Date(now.getFullYear(),now.getMonth(),1);const ys=new Date(now.getFullYear(),0,1);
+  return{week:{from:fmt(ws),to:fmt(now),label:'This Week'},last_week:{from:fmt(lws),to:fmt(lwe),label:'Last Week'},biweekly:{from:fmt(bw),to:fmt(now),label:'Last 14 Days'},month:{from:fmt(ms),to:fmt(now),label:'This Month'},ytd:{from:fmt(ys),to:fmt(now),label:'YTD'},all:{from:'',to:'',label:'All Time'}}[key];
+}
+function quickExport(key){const{from,to,label}=getPeriodDates(key);let url=`/api/export/pdf?label=${encodeURIComponent(label)}`;if(from)url+=`&from=${from}&to=${to}`;window.open(url,'_blank')}
+function customExport(){const from=gv('r-from'),to=gv('r-to'),title=gv('r-title')||'Report';if(!from||!to){toast('Select date range','error');return}window.open(`/api/export/pdf?from=${from}&to=${to}&label=${encodeURIComponent(title)}`,'_blank')}
+function customCSVExport(){const from=gv('r-from'),to=gv('r-to');let url='/api/export/csv';if(from&&to)url+=`?from=${from}&to=${to}`;window.open(url,'_blank')}
+
+async function importCSV(){
+  const file=$('csv-file').files[0];if(!file){toast('Select a CSV file','error');return}
+  const text=await file.text();
+  const res=await fetch('/api/import/csv',{method:'POST',headers:{'Content-Type':'text/plain'},body:text});
+  const data=await res.json();
+  if(res.ok)toast(`Imported ${data.imported} shifts, ${data.errors} errors`,'success');
+  else toast(data.error,'error');
+}
+
+// ── Settings ──
+async function loadSettings(){
+  $('set-name').value=currentUser.display_name;$('set-color').value=currentUser.color;
+  if(currentUser.is_admin){loadUsersList();loadJobsList();loadGoalsList()}
+}
+
+async function saveProfile(){
+  const body={display_name:gv('set-name'),color:gv('set-color')};
+  const pass=gv('set-pass');if(pass)body.password=pass;
+  await fetch('/api/users/'+currentUser.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  currentUser.display_name=body.display_name;currentUser.color=body.color;
+  $('topbar-user').innerHTML=`<span class="user-dot" style="background:${currentUser.color}"></span>${esc(currentUser.display_name)}`;
+  sv('set-pass','');toast('Profile saved','success');
+}
+
+async function loadUsersList(){
+  const users=await fetch('/api/users').then(r=>r.json());
+  $('users-list').innerHTML=users.map(u=>`
+    <div class="user-card">
+      <span class="user-dot" style="background:${u.color}"></span>
+      <div class="user-info"><strong>${esc(u.display_name)}</strong><small>@${esc(u.username)} ${u.is_admin?'· Admin':''}</small></div>
+      ${u.id!==currentUser.id?`<button class="btn btn-ghost btn-sm" onclick="toggleAdmin(${u.id},${u.is_admin?0:1})">${u.is_admin?'Demote':'Promote'}</button><button class="btn btn-danger" onclick="deleteUser(${u.id})">Delete</button>`:'<span style="font-family:var(--mono);font-size:.7rem;color:var(--text-mute)">You</span>'}
+    </div>
+  `).join('');
+}
+
+async function addUser(){
+  const body={username:gv('nu-user'),display_name:gv('nu-name'),password:gv('nu-pass')};
+  if(!body.username||!body.display_name||!body.password){toast('Fill all fields','error');return}
+  const res=await fetch('/api/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const data=await res.json();
+  if(!res.ok){toast(data.error,'error');return}
+  sv('nu-user','');sv('nu-name','');sv('nu-pass','');toast('User added','success');loadUsersList();
+}
+
+async function toggleAdmin(id,val){
+  await fetch('/api/users/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({is_admin:!!val})});
+  loadUsersList();
+}
+
+async function deleteUser(id){
+  if(!confirm('Delete this user?'))return;
+  await fetch('/api/users/'+id,{method:'DELETE'});toast('User deleted','success');loadUsersList();
+}
+
+async function loadJobsList(){
+  const jobs=await fetch('/api/jobs').then(r=>r.json());
+  $('jobs-list').innerHTML=jobs.map(j=>`
+    <div class="user-card"><span class="user-dot" style="background:${j.color}"></span>
+    <div class="user-info"><strong>${esc(j.name)}</strong><small>$${j.default_rate.toFixed(2)}/hr ${j.archived?'· Archived':''}</small></div>
+    ${!j.archived?`<button class="btn btn-danger" onclick="archiveJob(${j.id})">Archive</button>`:''}</div>
+  `).join('');
+}
+
+async function addJob(){
+  const body={name:gv('nj-name'),default_rate:parseFloat(gv('nj-rate'))||0,color:gv('nj-color')};
+  if(!body.name){toast('Enter job name','error');return}
+  await fetch('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  sv('nj-name','');sv('nj-rate','');toast('Job added','success');loadJobsList();loadJobs();
+}
+
+async function archiveJob(id){
+  await fetch('/api/jobs/'+id,{method:'DELETE'});toast('Job archived','success');loadJobsList();loadJobs();
+}
+
+async function loadGoalsList(){
+  const goals=await fetch('/api/goals').then(r=>r.json());
+  $('goals-list').innerHTML=goals.map(g=>`
+    <div class="user-card"><div class="user-info"><strong>${g.period} — $${g.target_amount.toFixed(0)}</strong><small>${g.active?'Active':'Inactive'}</small></div>
+    <button class="btn btn-danger" onclick="deleteGoal(${g.id})">Delete</button></div>
+  `).join('')||'<p class="empty">No goals set.</p>';
+}
+
+async function addGoal(){
+  const body={period:gv('ng-period'),target_amount:parseFloat(gv('ng-amount'))||0,active:true};
+  if(!body.target_amount){toast('Enter target amount','error');return}
+  await fetch('/api/goals',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  sv('ng-amount','');toast('Goal added','success');loadGoalsList();
+}
+
+async function deleteGoal(id){
+  await fetch('/api/goals/'+id,{method:'DELETE'});toast('Goal deleted','success');loadGoalsList();
+}
+
+// ── Toast ──
+function toast(msg,type=''){const el=document.createElement('div');el.className=`toast ${type}`;el.textContent=msg;$('toasts').appendChild(el);setTimeout(()=>el.remove(),3500)}
+
+// ── Keyboard Shortcuts ──
+document.addEventListener('keydown',e=>{
+  const tag=document.activeElement.tagName;
+  if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT')return;
+  if(e.key==='?'){e.preventDefault();$('shortcut-overlay').classList.toggle('open');return}
+  if(e.key==='Escape'){$('shortcut-overlay').classList.remove('open');closeEditModal();return}
+  const idx='12345'.indexOf(e.key);
+  if(idx>=0&&idx<viewKeys.length){
+    const navItems=document.querySelectorAll('.nav-item');
+    if(navItems[idx])navigate(navItems[idx]);
+  }
+});
+document.addEventListener('keydown',e=>{
+  if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){
+    const logView=$('view-log');
+    if(logView.classList.contains('active')){e.preventDefault();logShift()}
+  }
+});
+
+// ── Service Worker ──
+if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{})}
+</script>
+</body>
+</html>
