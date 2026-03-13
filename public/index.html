@@ -480,6 +480,23 @@ canvas{max-height:280px}
   </div>
 </div>
 
+<!-- Job Edit Modal -->
+<div class="modal-overlay" id="job-edit-modal">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">Edit Job</span><button class="close-btn" onclick="closeJobModal()">&times;</button></div>
+    <div class="form-grid">
+      <input type="hidden" id="ej-id">
+      <div class="form-group"><label>Job Name</label><input id="ej-name"></div>
+      <div class="form-group"><label>Default Rate ($)</label><input type="number" id="ej-rate" step="0.25" min="0"></div>
+      <div class="form-group"><label>Color</label><input type="color" id="ej-color" style="height:42px;padding:4px"></div>
+      <div class="form-group"><label>OT Threshold (hrs/wk)</label><input type="number" id="ej-ot-threshold" step="1" min="0" value="40"></div>
+      <div class="form-group"><label>OT Multiplier</label><input type="number" id="ej-ot-multiplier" step="0.1" min="1" value="1.5"></div>
+    </div>
+    <div class="divider"></div>
+    <div style="display:flex;gap:10px"><button class="btn btn-primary" onclick="saveJobEdit()">Save</button><button class="btn btn-ghost" onclick="closeJobModal()">Cancel</button></div>
+  </div>
+</div>
+
 <!-- Shortcut Help -->
 <div class="shortcut-overlay" id="shortcut-overlay" onclick="this.classList.remove('open')">
   <div class="shortcut-box" onclick="event.stopPropagation()">
@@ -935,20 +952,48 @@ async function loadJobsList(){
   const jobs=await fetch('/api/jobs').then(r=>r.json());
   $('jobs-list').innerHTML=jobs.map(j=>`
     <div class="user-card"><span class="user-dot" style="background:${j.color}"></span>
-    <div class="user-info"><strong>${esc(j.name)}</strong><small>$${j.default_rate.toFixed(2)}/hr ${j.archived?'· Archived':''}</small></div>
-    ${!j.archived?`<button class="btn btn-danger" onclick="archiveJob(${j.id})">Archive</button>`:''}</div>
+    <div class="user-info"><strong>${esc(j.name)}</strong><small>$${j.default_rate.toFixed(2)}/hr · OT ${j.overtime_threshold||40}h @ ${j.overtime_multiplier||1.5}x${j.archived?' · Archived':''}</small></div>
+    <div style="display:flex;gap:6px">
+      ${!j.archived?`<button class="btn btn-ghost btn-sm" onclick="editJob(${j.id})">Edit</button><button class="btn btn-danger btn-sm" onclick="deleteJob(${j.id},'${j.name.replace(/'/g,"\\'")}')">Delete</button>`:'<small style="opacity:.5">Archived</small>'}
+    </div></div>
   `).join('');
 }
 
 async function addJob(){
   const body={name:gv('nj-name'),default_rate:parseFloat(gv('nj-rate'))||0,color:gv('nj-color')};
   if(!body.name){toast('Enter job name','error');return}
-  await fetch('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const res=await fetch('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!res.ok){const d=await res.json();toast(d.error||'Failed to add job','error');return}
   sv('nj-name','');sv('nj-rate','');toast('Job added','success');loadJobsList();loadJobs();
 }
 
-async function archiveJob(id){
-  await fetch('/api/jobs/'+id,{method:'DELETE'});toast('Job archived','success');loadJobsList();loadJobs();
+async function editJob(id){
+  const jobs=await fetch('/api/jobs').then(r=>r.json());
+  const j=jobs.find(x=>x.id===id);
+  if(!j){toast('Job not found','error');return}
+  sv('ej-id',j.id);sv('ej-name',j.name);sv('ej-rate',j.default_rate);
+  $('ej-color').value=j.color||'#f5a623';
+  sv('ej-ot-threshold',j.overtime_threshold||40);sv('ej-ot-multiplier',j.overtime_multiplier||1.5);
+  $('job-edit-modal').classList.add('open');
+}
+
+function closeJobModal(){$('job-edit-modal').classList.remove('open')}
+
+async function saveJobEdit(){
+  const id=gv('ej-id');
+  const body={name:gv('ej-name'),default_rate:parseFloat(gv('ej-rate'))||0,color:$('ej-color').value,
+    overtime_threshold:parseFloat(gv('ej-ot-threshold'))||40,overtime_multiplier:parseFloat(gv('ej-ot-multiplier'))||1.5};
+  if(!body.name){toast('Job name is required','error');return}
+  const res=await fetch('/api/jobs/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!res.ok){const d=await res.json();toast(d.error||'Failed to update job','error');return}
+  closeJobModal();toast('Job updated','success');loadJobsList();loadJobs();
+}
+
+async function deleteJob(id,name){
+  if(!confirm('Delete "'+name+'"? This will archive the job. Existing shifts will keep their history but the job will no longer be available for new shifts.'))return;
+  const res=await fetch('/api/jobs/'+id,{method:'DELETE'});
+  if(!res.ok){const d=await res.json();toast(d.error||'Failed to delete job','error');return}
+  toast('Job deleted','success');loadJobsList();loadJobs();
 }
 
 async function loadGoalsList(){
