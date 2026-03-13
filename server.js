@@ -132,6 +132,30 @@ function migrate() {
         )
       `);
     },
+    // v5: tax_config table + pay period defaults
+    () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS tax_config (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          key         TEXT    NOT NULL UNIQUE,
+          label       TEXT    NOT NULL,
+          rate        REAL    NOT NULL DEFAULT 0,
+          flat_amount REAL    NOT NULL DEFAULT 0,
+          enabled     INTEGER NOT NULL DEFAULT 1,
+          sort_order  INTEGER NOT NULL DEFAULT 0
+        )
+      `);
+      // Insert default tax items
+      const insert = db.prepare('INSERT OR IGNORE INTO tax_config (key, label, rate, flat_amount, enabled, sort_order) VALUES (?,?,?,?,?,?)');
+      insert.run('federal', 'Federal Income Tax', 0.22, 0, 1, 0);
+      insert.run('state', 'State Income Tax', 0.05, 0, 1, 1);
+      insert.run('social_security', 'Social Security', 0.062, 0, 1, 2);
+      insert.run('medicare', 'Medicare', 0.0145, 0, 1, 3);
+      insert.run('tip_tax', 'Tip Tax (Self-Employment)', 0.153, 0, 1, 4);
+      // Set default pay period type
+      db.prepare("INSERT OR IGNORE INTO meta (key, value) VALUES ('pay_period_type', 'weekly')").run();
+      db.prepare("INSERT OR IGNORE INTO meta (key, value) VALUES ('pay_period_anchor', '')").run();
+    },
   ];
 
   const tx = db.transaction(() => {
@@ -590,23 +614,216 @@ app.delete('/api/jobs/:id', authMiddleware, (req, res) => {
 // ── Settings Routes ───────────────────────────────────────────────────────────
 
 app.get('/api/settings', authMiddleware, (req, res) => {
-  const rows = db.prepare("SELECT key, value FROM meta WHERE key LIKE 'setting_%' OR key = 'pay_week_start_day'").all();
+  const rows = db.prepare("SELECT key, value FROM meta WHERE key IN ('pay_week_start_day','pay_period_type','pay_period_anchor')").all();
   const settings = {};
   rows.forEach(r => { settings[r.key] = r.value; });
-  // Ensure defaults
   if (!settings.pay_week_start_day) settings.pay_week_start_day = '1';
+  if (!settings.pay_period_type) settings.pay_period_type = 'weekly';
+  if (!settings.pay_period_anchor) settings.pay_period_anchor = '';
   res.json(settings);
 });
 
 app.put('/api/settings', authMiddleware, adminOnly, (req, res) => {
   try {
-    const { pay_week_start_day } = req.body;
+    const { pay_week_start_day, pay_period_type, pay_period_anchor } = req.body;
     if (pay_week_start_day !== undefined) {
       const day = parseInt(pay_week_start_day, 10);
       if (isNaN(day) || day < 0 || day > 6) return res.status(400).json({ error: 'Invalid day (0-6)' });
       db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('pay_week_start_day', ?)").run(String(day));
     }
+    if (pay_period_type !== undefined) {
+      const valid = ['weekly', 'biweekly', 'semimonthly', 'monthly'];
+      if (!valid.includes(pay_period_type)) return res.status(400).json({ error: 'Invalid pay period type' });
+      db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('pay_period_type', ?)").run(pay_period_type);
+    }
+    if (pay_period_anchor !== undefined) {
+      db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('pay_period_anchor', ?)").run(pay_period_anchor);
+    }
     res.json({ success: true });
+  } catch (e) {
+    logger.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Tax Config Routes ─────────────────────────────────────────────────────────
+
+app.get('/api/tax-config', authMiddleware, (req, res) => {
+  res.json(db.prepare('SELECT * FROM tax_config ORDER BY sort_order ASC').all());
+});
+
+app.put('/api/tax-config/:id', authMiddleware, adminOnly, (req, res) => {
+  try {
+    const { label, rate, flat_amount, enabled } = req.body;
+    const id = parseInt(req.params.id, 10);
+    if (rate !== undefined && (isNaN(rate) || rate < 0 || rate > 1)) return res.status(400).json({ error: 'Rate must be 0-1' });
+    if (flat_amount !== undefined && (isNaN(flat_amount) || flat_amount < 0)) return res.status(400).json({ error: 'Flat amount must be >= 0' });
+    const row = db.prepare('SELECT * FROM tax_config WHERE id = ?').get(id);
+    if (!row) return res.status(404).json({ error: 'Tax config not found' });
+    db.prepare('UPDATE tax_config SET label=?, rate=?, flat_amount=?, enabled=? WHERE id=?')
+      .run(label ?? row.label, rate ?? row.rate, flat_amount ?? row.flat_amount, enabled !== undefined ? (enabled ? 1 : 0) : row.enabled, id);
+    res.json({ success: true });
+  } catch (e) { logger.error(e); res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/tax-config', authMiddleware, adminOnly, (req, res) => {
+  try {
+    const { key, label, rate, flat_amount } = req.body;
+    if (!key || !label) return res.status(400).json({ error: 'Key and label required' });
+    const maxOrder = db.prepare('SELECT MAX(sort_order) as m FROM tax_config').get().m || 0;
+    const result = db.prepare('INSERT INTO tax_config (key, label, rate, flat_amount, enabled, sort_order) VALUES (?,?,?,?,1,?)')
+      .run(key, label, rate || 0, flat_amount || 0, maxOrder + 1);
+    res.json({ id: result.lastInsertRowid });
+  } catch (e) {
+    if (e.message.includes('UNIQUE')) return res.status(409).json({ error: 'Key already exists' });
+    logger.error(e); res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/api/tax-config/:id', authMiddleware, adminOnly, (req, res) => {
+  db.prepare('DELETE FROM tax_config WHERE id = ?').run(req.params.id);
+  res.json({ success: true });
+});
+
+// ── Paycheck Estimate ────────────────────────────────────────────────────────
+
+function getPayPeriodBounds() {
+  const now = new Date();
+  const meta = {};
+  db.prepare("SELECT key, value FROM meta WHERE key IN ('pay_period_type','pay_period_anchor','pay_week_start_day')").all()
+    .forEach(r => { meta[r.key] = r.value; });
+
+  const periodType = meta.pay_period_type || 'weekly';
+  const startDay = parseInt(meta.pay_week_start_day || '1', 10);
+  const anchor = meta.pay_period_anchor || '';
+
+  let periodStart, periodEnd, prevStart, prevEnd, periodLabel;
+
+  if (periodType === 'weekly') {
+    const daysSince = (now.getDay() - startDay + 7) % 7;
+    periodStart = new Date(now); periodStart.setDate(now.getDate() - daysSince); periodStart.setHours(0,0,0,0);
+    periodEnd = new Date(periodStart); periodEnd.setDate(periodEnd.getDate() + 6);
+    prevStart = new Date(periodStart); prevStart.setDate(prevStart.getDate() - 7);
+    prevEnd = new Date(periodStart); prevEnd.setDate(prevEnd.getDate() - 1);
+    periodLabel = 'Weekly';
+  } else if (periodType === 'biweekly') {
+    let anchorDate;
+    if (anchor && /^\d{4}-\d{2}-\d{2}$/.test(anchor)) {
+      anchorDate = new Date(anchor + 'T00:00:00');
+    } else {
+      // Default: use the most recent start-day as anchor
+      const daysSince = (now.getDay() - startDay + 7) % 7;
+      anchorDate = new Date(now); anchorDate.setDate(now.getDate() - daysSince); anchorDate.setHours(0,0,0,0);
+    }
+    const diffDays = Math.floor((now - anchorDate) / 86400000);
+    const cycleDay = ((diffDays % 14) + 14) % 14;
+    periodStart = new Date(now); periodStart.setDate(now.getDate() - cycleDay); periodStart.setHours(0,0,0,0);
+    periodEnd = new Date(periodStart); periodEnd.setDate(periodEnd.getDate() + 13);
+    prevStart = new Date(periodStart); prevStart.setDate(prevStart.getDate() - 14);
+    prevEnd = new Date(periodStart); prevEnd.setDate(prevEnd.getDate() - 1);
+    periodLabel = 'Bi-Weekly';
+  } else if (periodType === 'semimonthly') {
+    const day = now.getDate();
+    if (day <= 15) {
+      periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      periodEnd = new Date(now.getFullYear(), now.getMonth(), 15);
+      const pm = new Date(now.getFullYear(), now.getMonth(), 0);
+      prevStart = new Date(pm.getFullYear(), pm.getMonth(), 16);
+      prevEnd = pm;
+    } else {
+      periodStart = new Date(now.getFullYear(), now.getMonth(), 16);
+      periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      prevStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      prevEnd = new Date(now.getFullYear(), now.getMonth(), 15);
+    }
+    periodLabel = 'Semi-Monthly';
+  } else {
+    // monthly
+    periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    prevStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    prevEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+    periodLabel = 'Monthly';
+  }
+
+  const totalDays = Math.round((periodEnd - periodStart) / 86400000) + 1;
+  const elapsed = Math.round((now - periodStart) / 86400000) + 1;
+  const remaining = Math.max(0, totalDays - elapsed);
+
+  return { periodStart, periodEnd, prevStart, prevEnd, periodLabel, totalDays, elapsed, remaining };
+}
+
+app.get('/api/paycheck-estimate', authMiddleware, (req, res) => {
+  try {
+    const pp = getPayPeriodBounds();
+    const from = fmt(pp.periodStart), to = fmt(pp.periodEnd);
+    const prevFrom = fmt(pp.prevStart), prevTo = fmt(pp.prevEnd);
+
+    const sumQuery = `SELECT COALESCE(SUM(wage_total),0) as wages, COALESCE(SUM(total_tips),0) as tips,
+      COALESCE(SUM(grand_total),0) as gross, COALESCE(SUM(hours_worked),0) as hours, COUNT(*) as shifts
+      FROM shifts WHERE date >= ? AND date <= ? AND deleted_at IS NULL`;
+
+    const current = db.prepare(sumQuery).get(from, to);
+    const previous = db.prepare(sumQuery).get(prevFrom, prevTo);
+
+    // Get tax config
+    const taxes = db.prepare('SELECT * FROM tax_config WHERE enabled = 1 ORDER BY sort_order ASC').all();
+
+    // Calculate itemized taxes
+    let totalTax = 0;
+    const taxBreakdown = taxes.map(t => {
+      let taxable = t.key === 'tip_tax' ? current.tips : current.wages;
+      // For federal/state/ss/medicare, apply to wages + tips combined (except tip_tax which is tips only)
+      if (['federal', 'state', 'social_security', 'medicare'].includes(t.key)) {
+        taxable = current.gross;
+      }
+      const amount = Math.round((taxable * t.rate + t.flat_amount) * 100) / 100;
+      totalTax += amount;
+      return { key: t.key, label: t.label, rate: t.rate, flat_amount: t.flat_amount, amount };
+    });
+
+    const netPay = Math.round((current.gross - totalTax) * 100) / 100;
+
+    // Projection: extrapolate if mid-period
+    let projectedGross = current.gross, projectedNet = netPay;
+    if (pp.elapsed < pp.totalDays && pp.elapsed > 0) {
+      const pace = current.gross / pp.elapsed;
+      projectedGross = Math.round(pace * pp.totalDays * 100) / 100;
+      const projTax = taxes.reduce((sum, t) => {
+        const base = t.key === 'tip_tax' ? (current.tips / pp.elapsed * pp.totalDays) : projectedGross;
+        const taxBase = ['federal','state','social_security','medicare'].includes(t.key) ? projectedGross : base;
+        return sum + taxBase * t.rate + t.flat_amount;
+      }, 0);
+      projectedNet = Math.round((projectedGross - projTax) * 100) / 100;
+    }
+
+    res.json({
+      period: {
+        type: pp.periodLabel,
+        start: from,
+        end: to,
+        total_days: pp.totalDays,
+        elapsed_days: pp.elapsed,
+        remaining_days: pp.remaining,
+      },
+      current: {
+        wages: current.wages,
+        tips: current.tips,
+        gross: current.gross,
+        hours: current.hours,
+        shifts: current.shifts,
+      },
+      previous: {
+        gross: previous.gross,
+        hours: previous.hours,
+        shifts: previous.shifts,
+      },
+      taxes: taxBreakdown,
+      total_tax: Math.round(totalTax * 100) / 100,
+      net_pay: netPay,
+      projected_gross: projectedGross,
+      projected_net: projectedNet,
+    });
   } catch (e) {
     logger.error(e);
     res.status(500).json({ error: e.message });

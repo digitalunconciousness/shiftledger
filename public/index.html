@@ -344,6 +344,8 @@ canvas{max-height:280px}
       <div class="chart-card"><div class="chart-header"><div class="chart-title">Tip % of Total Earnings</div></div><canvas id="tipratio-chart" style="max-height:200px"></canvas></div>
       <!-- Effective Rate Chart -->
       <div class="chart-card"><div class="chart-header"><div class="chart-title">Effective Hourly Rate</div></div><canvas id="effrate-chart" style="max-height:200px"></canvas></div>
+      <!-- Paycheck Estimate -->
+      <div id="paycheck-card"></div>
       <!-- Overtime + Tax Cards -->
       <div class="summary-grid" id="extra-cards"></div>
     </div>
@@ -471,7 +473,35 @@ canvas{max-height:280px}
                 <option value="6">Saturday</option>
               </select>
             </div>
+            <div class="form-group">
+              <label>Pay Period</label>
+              <select id="set-pay-period" onchange="toggleAnchor()">
+                <option value="weekly">Weekly</option>
+                <option value="biweekly">Bi-Weekly</option>
+                <option value="semimonthly">Semi-Monthly (1st & 15th)</option>
+                <option value="monthly">Monthly</option>
+              </select>
+            </div>
+            <div class="form-group" id="anchor-group" style="display:none">
+              <label>Bi-Weekly Anchor Date</label>
+              <input type="date" id="set-anchor" title="A known payday — used to align the 2-week cycle">
+            </div>
             <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="saveAppSettings()">Save Settings</button></div>
+          </div>
+        </div>
+        <!-- Tax & Deduction Rates -->
+        <div class="card" style="margin-bottom:20px">
+          <div class="card-label" style="margin-bottom:12px">Tax & Deduction Rates</div>
+          <p style="font-size:.75rem;color:var(--text-mute);margin-bottom:12px;font-family:var(--mono)">These estimates are for budgeting only — not tax advice.</p>
+          <div id="tax-config-list"></div>
+          <div class="divider"></div>
+          <div class="card-label" style="margin-bottom:8px">Add Custom Deduction</div>
+          <div class="form-grid">
+            <div class="form-group"><label>Key</label><input id="ntc-key" placeholder="e.g. health_ins"></div>
+            <div class="form-group"><label>Label</label><input id="ntc-label" placeholder="e.g. Health Insurance"></div>
+            <div class="form-group"><label>Rate (%)</label><input type="number" id="ntc-rate" step="0.1" min="0" max="100" placeholder="0"></div>
+            <div class="form-group"><label>Flat ($/period)</label><input type="number" id="ntc-flat" step="1" min="0" placeholder="0"></div>
+            <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addTaxConfig()">Add</button></div>
           </div>
         </div>
       </div>
@@ -720,13 +750,14 @@ function setDashFilter(el,uid){
 
 async function loadDashboard(){
   const qs=dashFilterUser?`?user_id=${dashFilterUser}`:'';
-  const[sumRes,trendRes,dowRes,tipRes,otRes,taxRes,goalsRes]=await Promise.all([
+  const[sumRes,trendRes,dowRes,tipRes,otRes,taxRes,goalsRes,pchkRes]=await Promise.all([
     fetch('/api/summary'+qs),fetch('/api/trends?period='+currentPeriod),
     fetch('/api/analytics/effective-rate'),fetch('/api/analytics/tip-ratio'),
-    fetch('/api/overtime'),fetch('/api/tax-estimate?period=ytd'),fetch('/api/goals')
+    fetch('/api/overtime'),fetch('/api/tax-estimate?period=ytd'),fetch('/api/goals'),
+    fetch('/api/paycheck-estimate')
   ]);
-  const[summary,trends,dow,tipRatio,overtime,tax,goals]=await Promise.all([sumRes.json(),trendRes.json(),dowRes.json(),tipRes.json(),otRes.json(),taxRes.json(),goalsRes.json()]);
-  renderSummaryCards(summary);renderHeatmap(dow);renderTrendChart(trends);renderBreakdownChart(trends);renderTipRatioChart(tipRatio);renderEffRateChart(trends);renderExtraCards(overtime,tax);renderGoals(goals,summary);
+  const[summary,trends,dow,tipRatio,overtime,tax,goals,paycheck]=await Promise.all([sumRes.json(),trendRes.json(),dowRes.json(),tipRes.json(),otRes.json(),taxRes.json(),goalsRes.json(),pchkRes.json()]);
+  renderSummaryCards(summary);renderHeatmap(dow);renderTrendChart(trends);renderBreakdownChart(trends);renderTipRatioChart(tipRatio);renderEffRateChart(trends);renderExtraCards(overtime,tax);renderGoals(goals,summary);renderPaycheckCard(paycheck);
 }
 
 function renderSummaryCards(s){
@@ -926,7 +957,7 @@ async function importCSV(){
 }
 
 // ── Settings ──
-let appSettings={pay_week_start_day:'1'};
+let appSettings={pay_week_start_day:'1',pay_period_type:'weekly',pay_period_anchor:''};
 
 async function loadAppSettings(){
   try{const s=await fetch('/api/settings').then(r=>r.json());appSettings=s;return s}catch(e){return appSettings}
@@ -938,15 +969,89 @@ async function loadSettings(){
     loadUsersList();loadJobsList();loadGoalsList();
     const s=await loadAppSettings();
     $('set-week-start').value=s.pay_week_start_day||'1';
+    $('set-pay-period').value=s.pay_period_type||'weekly';
+    $('set-anchor').value=s.pay_period_anchor||'';
+    toggleAnchor();
+    loadTaxConfig();
   }
 }
 
+function toggleAnchor(){
+  $('anchor-group').style.display=$('set-pay-period').value==='biweekly'?'':'none';
+}
+
 async function saveAppSettings(){
-  const body={pay_week_start_day:parseInt($('set-week-start').value,10)};
+  const body={
+    pay_week_start_day:parseInt($('set-week-start').value,10),
+    pay_period_type:$('set-pay-period').value,
+    pay_period_anchor:$('set-anchor').value||''
+  };
   const res=await fetch('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(!res.ok){const d=await res.json();toast(d.error||'Failed to save settings','error');return}
-  appSettings.pay_week_start_day=String(body.pay_week_start_day);
-  toast('Settings saved — pay week now starts on '+['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][body.pay_week_start_day],'success');
+  Object.assign(appSettings,{pay_week_start_day:String(body.pay_week_start_day),pay_period_type:body.pay_period_type,pay_period_anchor:body.pay_period_anchor});
+  const dayName=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][body.pay_week_start_day];
+  const periodNames={weekly:'Weekly',biweekly:'Bi-Weekly',semimonthly:'Semi-Monthly',monthly:'Monthly'};
+  toast('Settings saved — '+periodNames[body.pay_period_type]+' pay period, week starts '+dayName,'success');
+}
+
+async function loadTaxConfig(){
+  const taxes=await fetch('/api/tax-config').then(r=>r.json());
+  $('tax-config-list').innerHTML=taxes.map(t=>`
+    <div class="user-card" style="margin-bottom:8px">
+      <div class="user-info" style="flex:1">
+        <strong>${esc(t.label)}</strong>
+        <small>${(t.rate*100).toFixed(2)}%${t.flat_amount>0?' + $'+t.flat_amount.toFixed(2)+'/period':''}${!t.enabled?' · Disabled':''}</small>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input type="number" value="${(t.rate*100).toFixed(2)}" step="0.1" min="0" max="100" style="width:70px" id="tcr-${t.id}" title="Rate %">
+        <input type="number" value="${t.flat_amount.toFixed(2)}" step="1" min="0" style="width:80px" id="tcf-${t.id}" title="Flat $/period">
+        <button class="btn btn-ghost btn-sm" onclick="saveTaxRate(${t.id})">Save</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteTaxConfig(${t.id},'${esc(t.label)}')">×</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function saveTaxRate(id){
+  const rate=parseFloat($('tcr-'+id).value)/100;
+  const flat_amount=parseFloat($('tcf-'+id).value)||0;
+  if(isNaN(rate)||rate<0||rate>1){toast('Rate must be 0-100%','error');return}
+  const res=await fetch('/api/tax-config/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({rate,flat_amount})});
+  if(!res.ok){toast('Failed to save','error');return}
+  toast('Tax rate updated','success');
+}
+
+async function addTaxConfig(){
+  const key=gv('ntc-key'),label=gv('ntc-label'),rate=(parseFloat(gv('ntc-rate'))||0)/100,flat_amount=parseFloat(gv('ntc-flat'))||0;
+  if(!key||!label){toast('Key and label required','error');return}
+  const res=await fetch('/api/tax-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,label,rate,flat_amount})});
+  if(!res.ok){const d=await res.json();toast(d.error||'Failed','error');return}
+  sv('ntc-key','');sv('ntc-label','');sv('ntc-rate','');sv('ntc-flat','');
+  toast('Deduction added','success');loadTaxConfig();
+}
+
+async function deleteTaxConfig(id,label){
+  if(!confirm('Delete "'+label+'"?'))return;
+  await fetch('/api/tax-config/'+id,{method:'DELETE'});toast('Removed','success');loadTaxConfig();
+}
+
+function renderPaycheckCard(p){
+  if(!p||!p.period){$('paycheck-card').innerHTML='';return}
+  const prevDiff=p.previous.gross>0?((p.current.gross-p.previous.gross)/p.previous.gross*100).toFixed(1):null;
+  const cmpHtml=prevDiff!==null?`<span style="color:${parseFloat(prevDiff)>=0?'var(--green)':'var(--red)'}">${parseFloat(prevDiff)>=0?'↑':'↓'}${Math.abs(prevDiff)}% vs prev</span>`:'';
+  const taxRows=p.taxes.map(t=>`<div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:.8rem;padding:2px 0"><span style="color:var(--text-mute)">${esc(t.label)} (${(t.rate*100).toFixed(1)}%)</span><span>-$${t.amount.toFixed(2)}</span></div>`).join('');
+  $('paycheck-card').innerHTML=`
+    <div class="chart-card" style="margin-bottom:24px">
+      <div class="chart-title" style="margin-bottom:4px">PAYCHECK ESTIMATE · ${esc(p.period.type)}</div>
+      <div style="font-size:.75rem;color:var(--text-mute);margin-bottom:16px;font-family:var(--mono)">${p.period.start} → ${p.period.end} · Day ${p.period.elapsed_days}/${p.period.total_days} · ${p.period.remaining_days} days left ${cmpHtml}</div>
+      <div class="summary-grid" style="margin-bottom:16px">
+        <div class="card"><div class="card-label">Gross Pay</div><div class="card-value">$${p.current.gross.toFixed(2)}</div><div class="card-sub">${p.current.shifts} shift${p.current.shifts!==1?'s':''} · ${p.current.hours.toFixed(1)} hrs</div></div>
+        <div class="card"><div class="card-label">Est. Taxes</div><div class="card-value" style="color:var(--red)">-$${p.total_tax.toFixed(2)}</div><div class="card-sub">${p.taxes.length} deduction${p.taxes.length!==1?'s':''}</div></div>
+        <div class="card"><div class="card-label">Est. Net Pay</div><div class="card-value amber">$${p.net_pay.toFixed(2)}</div><div class="card-sub">Projected: $${p.projected_net.toFixed(2)}</div></div>
+      </div>
+      <details style="cursor:pointer"><summary style="font-size:.8rem;font-family:var(--mono);color:var(--text-mute);margin-bottom:8px">Tax Breakdown</summary>${taxRows}</details>
+      <div style="font-size:.65rem;color:var(--text-mute);font-family:var(--mono);margin-top:12px;font-style:italic">Estimates are for budgeting only — not tax advice.</div>
+    </div>`;
 }
 
 async function saveProfile(){
