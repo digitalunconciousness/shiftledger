@@ -156,6 +156,13 @@ function migrate() {
       db.prepare("INSERT OR IGNORE INTO meta (key, value) VALUES ('pay_period_type', 'weekly')").run();
       db.prepare("INSERT OR IGNORE INTO meta (key, value) VALUES ('pay_period_anchor', '')").run();
     },
+    // v6: tip_payment column on jobs
+    () => {
+      const cols = db.prepare('PRAGMA table_info(jobs)').all().map(c => c.name);
+      if (!cols.includes('tip_payment')) {
+        db.exec("ALTER TABLE jobs ADD COLUMN tip_payment TEXT NOT NULL DEFAULT 'cash'");
+      }
+    },
   ];
 
   const tx = db.transaction(() => {
@@ -297,6 +304,7 @@ const JobSchema = z.object({
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional().default('#f5a623'),
   overtime_threshold: z.number().min(0).optional().default(40),
   overtime_multiplier: z.number().min(1).optional().default(1.5),
+  tip_payment: z.enum(['cash', 'paycheck']).optional().default('cash'),
 });
 
 const TemplateSchema = z.object({
@@ -584,10 +592,10 @@ app.get('/api/jobs', authMiddleware, (req, res) => {
 
 app.post('/api/jobs', authMiddleware, validate(JobSchema), (req, res) => {
   try {
-    const { name, default_rate, color, overtime_threshold, overtime_multiplier } = req.validated;
-    const result = db.prepare('INSERT INTO jobs (name, default_rate, color, overtime_threshold, overtime_multiplier) VALUES (?,?,?,?,?)')
-      .run(name, default_rate, color, overtime_threshold, overtime_multiplier);
-    res.json({ id: result.lastInsertRowid, name, default_rate, color });
+    const { name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment } = req.validated;
+    const result = db.prepare('INSERT INTO jobs (name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment) VALUES (?,?,?,?,?,?)')
+      .run(name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment);
+    res.json({ id: result.lastInsertRowid, name, default_rate, color, tip_payment });
   } catch (e) {
     logger.error(e);
     res.status(500).json({ error: e.message });
@@ -596,9 +604,9 @@ app.post('/api/jobs', authMiddleware, validate(JobSchema), (req, res) => {
 
 app.put('/api/jobs/:id', authMiddleware, validate(JobSchema), (req, res) => {
   try {
-    const { name, default_rate, color, overtime_threshold, overtime_multiplier } = req.validated;
-    db.prepare('UPDATE jobs SET name=?, default_rate=?, color=?, overtime_threshold=?, overtime_multiplier=? WHERE id=?')
-      .run(name, default_rate, color, overtime_threshold, overtime_multiplier, req.params.id);
+    const { name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment } = req.validated;
+    db.prepare('UPDATE jobs SET name=?, default_rate=?, color=?, overtime_threshold=?, overtime_multiplier=?, tip_payment=? WHERE id=?')
+      .run(name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, req.params.id);
     res.json({ success: true });
   } catch (e) {
     logger.error(e);
@@ -759,6 +767,7 @@ app.get('/api/paycheck-estimate', authMiddleware, (req, res) => {
     const from = fmt(pp.periodStart), to = fmt(pp.periodEnd);
     const prevFrom = fmt(pp.prevStart), prevTo = fmt(pp.prevEnd);
 
+    // Sum all shifts in the period
     const sumQuery = `SELECT COALESCE(SUM(wage_total),0) as wages, COALESCE(SUM(total_tips),0) as tips,
       COALESCE(SUM(grand_total),0) as gross, COALESCE(SUM(hours_worked),0) as hours, COUNT(*) as shifts
       FROM shifts WHERE date >= ? AND date <= ? AND deleted_at IS NULL`;
@@ -766,32 +775,48 @@ app.get('/api/paycheck-estimate', authMiddleware, (req, res) => {
     const current = db.prepare(sumQuery).get(from, to);
     const previous = db.prepare(sumQuery).get(prevFrom, prevTo);
 
+    // Split tips by payment method (cash vs paycheck) based on each shift's job setting
+    const tipSplitQuery = `SELECT
+      COALESCE(SUM(CASE WHEN COALESCE(j.tip_payment,'cash')='cash' THEN s.total_tips ELSE 0 END),0) as cash_tips,
+      COALESCE(SUM(CASE WHEN COALESCE(j.tip_payment,'cash')='paycheck' THEN s.total_tips ELSE 0 END),0) as paycheck_tips
+      FROM shifts s LEFT JOIN jobs j ON s.job_id = j.id
+      WHERE s.date >= ? AND s.date <= ? AND s.deleted_at IS NULL`;
+
+    const tipSplit = db.prepare(tipSplitQuery).get(from, to);
+
+    // Paycheck gross = wages + paycheck tips (cash tips already received nightly)
+    const paycheckGross = current.wages + tipSplit.paycheck_tips;
+
     // Get tax config
     const taxes = db.prepare('SELECT * FROM tax_config WHERE enabled = 1 ORDER BY sort_order ASC').all();
 
-    // Calculate itemized taxes
+    // Calculate itemized taxes — taxes apply to ALL income (including cash tips)
     let totalTax = 0;
     const taxBreakdown = taxes.map(t => {
       let taxable = t.key === 'tip_tax' ? current.tips : current.wages;
-      // For federal/state/ss/medicare, apply to wages + tips combined (except tip_tax which is tips only)
       if (['federal', 'state', 'social_security', 'medicare'].includes(t.key)) {
-        taxable = current.gross;
+        taxable = current.gross; // wages + all tips
       }
       const amount = Math.round((taxable * t.rate + t.flat_amount) * 100) / 100;
       totalTax += amount;
       return { key: t.key, label: t.label, rate: t.rate, flat_amount: t.flat_amount, amount };
     });
 
-    const netPay = Math.round((current.gross - totalTax) * 100) / 100;
+    // Net paycheck = paycheck gross minus all taxes (taxes cover cash tips too)
+    const netPay = Math.round((paycheckGross - totalTax) * 100) / 100;
 
     // Projection: extrapolate if mid-period
-    let projectedGross = current.gross, projectedNet = netPay;
+    let projectedGross = paycheckGross, projectedNet = netPay;
+    let projectedCashTips = tipSplit.cash_tips;
     if (pp.elapsed < pp.totalDays && pp.elapsed > 0) {
-      const pace = current.gross / pp.elapsed;
+      const pace = paycheckGross / pp.elapsed;
       projectedGross = Math.round(pace * pp.totalDays * 100) / 100;
+      projectedCashTips = Math.round(tipSplit.cash_tips / pp.elapsed * pp.totalDays * 100) / 100;
+      const projectedTotalGross = projectedGross + projectedCashTips;
       const projTax = taxes.reduce((sum, t) => {
-        const base = t.key === 'tip_tax' ? (current.tips / pp.elapsed * pp.totalDays) : projectedGross;
-        const taxBase = ['federal','state','social_security','medicare'].includes(t.key) ? projectedGross : base;
+        const allTips = current.tips / pp.elapsed * pp.totalDays;
+        const base = t.key === 'tip_tax' ? allTips : projectedTotalGross;
+        const taxBase = ['federal','state','social_security','medicare'].includes(t.key) ? projectedTotalGross : base;
         return sum + taxBase * t.rate + t.flat_amount;
       }, 0);
       projectedNet = Math.round((projectedGross - projTax) * 100) / 100;
@@ -809,7 +834,10 @@ app.get('/api/paycheck-estimate', authMiddleware, (req, res) => {
       current: {
         wages: current.wages,
         tips: current.tips,
+        cash_tips: tipSplit.cash_tips,
+        paycheck_tips: tipSplit.paycheck_tips,
         gross: current.gross,
+        paycheck_gross: paycheckGross,
         hours: current.hours,
         shifts: current.shifts,
       },
@@ -823,6 +851,7 @@ app.get('/api/paycheck-estimate', authMiddleware, (req, res) => {
       net_pay: netPay,
       projected_gross: projectedGross,
       projected_net: projectedNet,
+      projected_cash_tips: projectedCashTips,
     });
   } catch (e) {
     logger.error(e);
