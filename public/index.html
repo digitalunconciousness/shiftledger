@@ -455,6 +455,25 @@ canvas{max-height:280px}
             <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addGoal()">Add Goal</button></div>
           </div>
         </div>
+        <!-- App Settings -->
+        <div class="card" style="margin-bottom:20px">
+          <div class="card-label" style="margin-bottom:12px">App Settings</div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Pay Week Starts On</label>
+              <select id="set-week-start">
+                <option value="0">Sunday</option>
+                <option value="1">Monday</option>
+                <option value="2">Tuesday</option>
+                <option value="3">Wednesday</option>
+                <option value="4">Thursday</option>
+                <option value="5">Friday</option>
+                <option value="6">Saturday</option>
+              </select>
+            </div>
+            <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="saveAppSettings()">Save Settings</button></div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -578,6 +597,7 @@ function enterApp(){
   document.getElementById('app-shell').classList.add('active');
   document.getElementById('topbar-date').textContent=new Date().toLocaleDateString('en-US',{weekday:'short',year:'numeric',month:'short',day:'numeric'});
   document.getElementById('topbar-user').innerHTML=`<span class="user-dot" style="background:${currentUser.color}"></span>${esc(currentUser.display_name)}`;
+  loadAppSettings();
   document.getElementById('f-date').value=today();
   if(currentUser.is_admin) document.getElementById('admin-section').style.display='block';
   loadJobs();loadTemplates();
@@ -884,10 +904,12 @@ async function saveEdit(){
 
 // ── Reports ──
 function getPeriodDates(key){
-  const now=new Date(),fmt=d=>d.toISOString().split('T')[0],dow=now.getDay()||7;
-  const ws=new Date(now);ws.setDate(now.getDate()-dow+1);
+  const now=new Date(),fmt=d=>d.toISOString().split('T')[0];
+  const startDay=parseInt(appSettings.pay_week_start_day||'1',10);
+  const daysSince=(now.getDay()-startDay+7)%7;
+  const ws=new Date(now);ws.setDate(now.getDate()-daysSince);ws.setHours(0,0,0,0);
   const lwe=new Date(ws);lwe.setDate(lwe.getDate()-1);const lws=new Date(lwe);lws.setDate(lwe.getDate()-6);
-  const bw=new Date(now);bw.setDate(now.getDate()-13);const ms=new Date(now.getFullYear(),now.getMonth(),1);const ys=new Date(now.getFullYear(),0,1);
+  const bw=new Date(ws);bw.setDate(bw.getDate()-7);const ms=new Date(now.getFullYear(),now.getMonth(),1);const ys=new Date(now.getFullYear(),0,1);
   return{week:{from:fmt(ws),to:fmt(now),label:'This Week'},last_week:{from:fmt(lws),to:fmt(lwe),label:'Last Week'},biweekly:{from:fmt(bw),to:fmt(now),label:'Last 14 Days'},month:{from:fmt(ms),to:fmt(now),label:'This Month'},ytd:{from:fmt(ys),to:fmt(now),label:'YTD'},all:{from:'',to:'',label:'All Time'}}[key];
 }
 function quickExport(key){const{from,to,label}=getPeriodDates(key);let url=`/api/export/pdf?label=${encodeURIComponent(label)}`;if(from)url+=`&from=${from}&to=${to}`;window.open(url,'_blank')}
@@ -904,9 +926,27 @@ async function importCSV(){
 }
 
 // ── Settings ──
+let appSettings={pay_week_start_day:'1'};
+
+async function loadAppSettings(){
+  try{const s=await fetch('/api/settings').then(r=>r.json());appSettings=s;return s}catch(e){return appSettings}
+}
+
 async function loadSettings(){
   $('set-name').value=currentUser.display_name;$('set-color').value=currentUser.color;
-  if(currentUser.is_admin){loadUsersList();loadJobsList();loadGoalsList()}
+  if(currentUser.is_admin){
+    loadUsersList();loadJobsList();loadGoalsList();
+    const s=await loadAppSettings();
+    $('set-week-start').value=s.pay_week_start_day||'1';
+  }
+}
+
+async function saveAppSettings(){
+  const body={pay_week_start_day:parseInt($('set-week-start').value,10)};
+  const res=await fetch('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!res.ok){const d=await res.json();toast(d.error||'Failed to save settings','error');return}
+  appSettings.pay_week_start_day=String(body.pay_week_start_day);
+  toast('Settings saved — pay week now starts on '+['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][body.pay_week_start_day],'success');
 }
 
 async function saveProfile(){

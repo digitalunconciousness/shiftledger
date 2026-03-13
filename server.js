@@ -317,12 +317,19 @@ function validate(schema) {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 const fmt = (d) => d.toISOString().split('T')[0];
 
+function getPayWeekStartDay() {
+  const row = db.prepare("SELECT value FROM meta WHERE key = 'pay_week_start_day'").get();
+  return row ? parseInt(row.value, 10) : 1; // default Monday (1)
+}
+
 function getPeriodBounds() {
   const now = new Date();
-  const dayOfWeek = now.getDay() || 7;
+  const startDay = getPayWeekStartDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+  const today = now.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+  const daysSinceStart = (today - startDay + 7) % 7;
 
   const weekStart = new Date(now);
-  weekStart.setDate(now.getDate() - dayOfWeek + 1);
+  weekStart.setDate(now.getDate() - daysSinceStart);
   weekStart.setHours(0, 0, 0, 0);
 
   const lastWeekEnd = new Date(weekStart);
@@ -330,8 +337,8 @@ function getPeriodBounds() {
   const lastWeekStart = new Date(lastWeekEnd);
   lastWeekStart.setDate(lastWeekEnd.getDate() - 6);
 
-  const biweekStart = new Date(now);
-  biweekStart.setDate(now.getDate() - 13);
+  const biweekStart = new Date(weekStart);
+  biweekStart.setDate(biweekStart.getDate() - 7);
 
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
@@ -578,6 +585,32 @@ app.put('/api/jobs/:id', authMiddleware, validate(JobSchema), (req, res) => {
 app.delete('/api/jobs/:id', authMiddleware, (req, res) => {
   db.prepare('UPDATE jobs SET archived = 1 WHERE id = ?').run(req.params.id);
   res.json({ success: true });
+});
+
+// ── Settings Routes ───────────────────────────────────────────────────────────
+
+app.get('/api/settings', authMiddleware, (req, res) => {
+  const rows = db.prepare("SELECT key, value FROM meta WHERE key LIKE 'setting_%' OR key = 'pay_week_start_day'").all();
+  const settings = {};
+  rows.forEach(r => { settings[r.key] = r.value; });
+  // Ensure defaults
+  if (!settings.pay_week_start_day) settings.pay_week_start_day = '1';
+  res.json(settings);
+});
+
+app.put('/api/settings', authMiddleware, adminOnly, (req, res) => {
+  try {
+    const { pay_week_start_day } = req.body;
+    if (pay_week_start_day !== undefined) {
+      const day = parseInt(pay_week_start_day, 10);
+      if (isNaN(day) || day < 0 || day > 6) return res.status(400).json({ error: 'Invalid day (0-6)' });
+      db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('pay_week_start_day', ?)").run(String(day));
+    }
+    res.json({ success: true });
+  } catch (e) {
+    logger.error(e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ── Templates Routes ─────────────────────────────────────────────────────────
