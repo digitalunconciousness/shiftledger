@@ -654,6 +654,136 @@ app.put('/api/settings', authMiddleware, adminOnly, (req, res) => {
   }
 });
 
+// ── Tax Profile Presets ───────────────────────────────────────────────────────
+// Effective federal tax rates computed from 2025 IRS tax brackets and standard
+// deductions. Social Security (6.2%) and Medicare (1.45%) are flat employee
+// rates per IRS Publication 15. State rates are national averages — users
+// should adjust to their own state. Update this data annually when IRS
+// publishes new inflation-adjusted brackets (typically November).
+//
+// Sources:
+//   Federal brackets: IRS Rev. Proc. 2024-40 (tax year 2025)
+//   SS wage base:     IRS News Release IR-2024-273 ($176,100 for 2025)
+//   Standard deductions: IRS Rev. Proc. 2024-40
+//     Single: $15,000 | MFJ: $30,000 | Head of Household: $22,500
+
+const TAX_PROFILES = [
+  // ── Single filer, no dependents ─────────────────────────────────────────
+  {
+    id: 'single_25k',
+    filing_status: 'Single',
+    income_range: '~$20k–$30k/yr',
+    label: 'Single, ~$25k/yr – no dependents',
+    approx_annual_income: 25000,
+    description: 'Single filer, no dependents. Est. $25,000 annual gross income.',
+    // Taxable: $25k − $15k deduction = $10k  →  10% × $10k = $1,000  →  eff. 4%
+    rates: { federal: 0.04, state: 0.05, social_security: 0.062, medicare: 0.0145 },
+  },
+  {
+    id: 'single_35k',
+    filing_status: 'Single',
+    income_range: '~$30k–$42k/yr',
+    label: 'Single, ~$35k/yr – no dependents',
+    approx_annual_income: 35000,
+    description: 'Single filer, no dependents. Est. $35,000 annual gross income.',
+    // Taxable: $20k  →  10%×$11,925 + 12%×$8,075 = $2,161  →  eff. 6%
+    rates: { federal: 0.06, state: 0.05, social_security: 0.062, medicare: 0.0145 },
+  },
+  {
+    id: 'single_50k',
+    filing_status: 'Single',
+    income_range: '~$42k–$60k/yr',
+    label: 'Single, ~$50k/yr – no dependents',
+    approx_annual_income: 50000,
+    description: 'Single filer, no dependents. Est. $50,000 annual gross income.',
+    // Taxable: $35k  →  10%×$11,925 + 12%×$23,075 = $3,962  →  eff. ~8%
+    rates: { federal: 0.08, state: 0.05, social_security: 0.062, medicare: 0.0145 },
+  },
+  {
+    id: 'single_65k',
+    filing_status: 'Single',
+    income_range: '~$60k–$75k/yr',
+    label: 'Single, ~$65k/yr – no dependents',
+    approx_annual_income: 65000,
+    description: 'Single filer, no dependents. Est. $65,000 annual gross income.',
+    // Taxable: $50k  →  ... + 22%×$1,525 = $5,914  →  eff. ~9%
+    rates: { federal: 0.09, state: 0.05, social_security: 0.062, medicare: 0.0145 },
+  },
+  // ── Head of Household (single with dependents) ───────────────────────────
+  {
+    id: 'hoh_30k',
+    filing_status: 'Head of Household',
+    income_range: '~$25k–$38k/yr',
+    label: 'Head of Household, ~$30k/yr',
+    approx_annual_income: 30000,
+    description: 'Head of household (single with dependents). Est. $30,000 annual gross income.',
+    // Taxable: $30k − $22,500 deduction = $7,500  →  10% × $7,500 = $750  →  eff. ~3%
+    rates: { federal: 0.03, state: 0.05, social_security: 0.062, medicare: 0.0145 },
+  },
+  {
+    id: 'hoh_45k',
+    filing_status: 'Head of Household',
+    income_range: '~$38k–$55k/yr',
+    label: 'Head of Household, ~$45k/yr',
+    approx_annual_income: 45000,
+    description: 'Head of household (single with dependents). Est. $45,000 annual gross income.',
+    // Taxable: $22,500  →  10%×$16,550 + 12%×$5,950 = $2,369  →  eff. ~5%
+    rates: { federal: 0.05, state: 0.05, social_security: 0.062, medicare: 0.0145 },
+  },
+  // ── Married Filing Jointly ───────────────────────────────────────────────
+  {
+    id: 'mfj_50k',
+    filing_status: 'Married Filing Jointly',
+    income_range: '~$40k–$65k/yr combined',
+    label: 'Married Filing Jointly, ~$50k/yr combined',
+    approx_annual_income: 50000,
+    description: 'Married filing jointly. Est. $50,000 combined annual gross income.',
+    // Taxable: $50k − $30k deduction = $20k  →  10% × $20k = $2,000  →  eff. 4%
+    rates: { federal: 0.04, state: 0.05, social_security: 0.062, medicare: 0.0145 },
+  },
+  {
+    id: 'mfj_80k',
+    filing_status: 'Married Filing Jointly',
+    income_range: '~$65k–$100k/yr combined',
+    label: 'Married Filing Jointly, ~$80k/yr combined',
+    approx_annual_income: 80000,
+    description: 'Married filing jointly. Est. $80,000 combined annual gross income.',
+    // Taxable: $50k  →  10%×$23,850 + 12%×$26,150 = $5,523  →  eff. ~7%
+    rates: { federal: 0.07, state: 0.05, social_security: 0.062, medicare: 0.0145 },
+  },
+];
+
+// Metadata about the preset rate data
+const TAX_PROFILES_META = {
+  tax_year: 2025,
+  last_updated: '2024-11-01',
+  sources: [
+    'IRS Rev. Proc. 2024-40 (2025 tax year brackets & standard deductions)',
+    'IRS News Release IR-2024-273 (2025 Social Security wage base)',
+  ],
+  note: 'State rates shown are approximate national averages. Adjust to your state.',
+};
+
+app.get('/api/tax-profiles', authMiddleware, (req, res) => {
+  res.json({ profiles: TAX_PROFILES, meta: TAX_PROFILES_META });
+});
+
+app.post('/api/tax-profiles/apply/:profileId', authMiddleware, adminOnly, (req, res) => {
+  const profile = TAX_PROFILES.find(p => p.id === req.params.profileId);
+  if (!profile) return res.status(404).json({ error: 'Profile not found' });
+
+  const update = db.prepare('UPDATE tax_config SET rate = ? WHERE key = ?');
+  const results = {};
+  const tx = db.transaction(() => {
+    for (const [key, rate] of Object.entries(profile.rates)) {
+      const info = update.run(rate, key);
+      results[key] = info.changes > 0 ? 'updated' : 'not_found';
+    }
+  });
+  tx();
+  res.json({ success: true, profile: profile.id, applied: results });
+});
+
 // ── Tax Config Routes ─────────────────────────────────────────────────────────
 
 app.get('/api/tax-config', authMiddleware, (req, res) => {

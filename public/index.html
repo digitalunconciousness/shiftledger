@@ -490,6 +490,34 @@ canvas{max-height:280px}
             <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="saveAppSettings()">Save Settings</button></div>
           </div>
         </div>
+        <!-- Tax Profile Presets -->
+        <div class="card" style="margin-bottom:20px">
+          <div class="card-label" style="margin-bottom:4px">Tax Profile Presets</div>
+          <p style="font-size:.75rem;color:var(--text-mute);margin-bottom:12px;font-family:var(--mono)">Select a filing status &amp; income range to auto-fill federal, SS, and Medicare rates. Adjust state rate for your state.</p>
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Filing Status</label>
+              <select id="tp-status" onchange="filterTaxProfiles()">
+                <option value="">— select —</option>
+                <option value="Single">Single (no dependents)</option>
+                <option value="Head of Household">Head of Household (with dependents)</option>
+                <option value="Married Filing Jointly">Married Filing Jointly</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Income Range</label>
+              <select id="tp-profile" onchange="previewTaxProfile()">
+                <option value="">— select status first —</option>
+              </select>
+            </div>
+          </div>
+          <div id="tp-preview" style="display:none;margin-top:8px;padding:12px;background:var(--surface);border-radius:8px;font-family:var(--mono);font-size:.8rem">
+            <div id="tp-preview-rates" style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px 20px;margin-bottom:8px"></div>
+            <div id="tp-preview-note" style="font-size:.72rem;color:var(--text-mute);margin-bottom:10px"></div>
+            <button class="btn btn-primary btn-sm" onclick="applyTaxProfile()">Apply Preset</button>
+          </div>
+          <div style="font-size:.68rem;color:var(--text-mute);font-family:var(--mono);margin-top:8px" id="tp-meta-line"></div>
+        </div>
         <!-- Tax & Deduction Rates -->
         <div class="card" style="margin-bottom:20px">
           <div class="card-label" style="margin-bottom:12px">Tax & Deduction Rates</div>
@@ -1032,6 +1060,7 @@ async function loadSettings(){
     $('set-anchor').value=s.pay_period_anchor||'';
     toggleAnchor();
     loadTaxConfig();
+    loadTaxProfiles();
   }
 }
 
@@ -1094,6 +1123,62 @@ async function deleteTaxConfig(id,label){
   if(!confirm('Delete "'+label+'"?'))return;
   await fetch('/api/tax-config/'+id,{method:'DELETE'});toast('Removed','success');loadTaxConfig();
 }
+
+// ── Tax Profile Presets ───────────────────────────────────────────────────────
+
+let taxProfilesData=null;
+const TP_PROFILE_PLACEHOLDER='<option value="">— select income range —</option>';
+
+async function loadTaxProfiles(){
+  if(taxProfilesData)return taxProfilesData;
+  const res=await fetch('/api/tax-profiles');
+  taxProfilesData=await res.json();
+  const m=taxProfilesData.meta;
+  const el=$('tp-meta-line');
+  if(el)el.textContent=`Based on ${m.tax_year} IRS brackets · last updated ${m.last_updated} · ${m.note}`;
+  return taxProfilesData;
+}
+
+async function filterTaxProfiles(){
+  const status=gv('tp-status');
+  const {profiles}=await loadTaxProfiles();
+  const sel=$('tp-profile');
+  if(!status){sel.innerHTML='<option value="">— select status first —</option>';$('tp-preview').style.display='none';return}
+  sel.innerHTML=TP_PROFILE_PLACEHOLDER;
+  profiles.filter(p=>p.filing_status===status).forEach(p=>{
+    const opt=document.createElement('option');
+    opt.value=p.id;opt.textContent=p.income_range+' · '+p.label;
+    sel.appendChild(opt);
+  });
+  $('tp-preview').style.display='none';
+}
+
+async function previewTaxProfile(){
+  const id=gv('tp-profile');
+  if(!id){$('tp-preview').style.display='none';return}
+  const {profiles}=await loadTaxProfiles();
+  const p=profiles.find(x=>x.id===id);
+  if(!p){$('tp-preview').style.display='none';return}
+  const rateNames={federal:'Federal',state:'State (avg)',social_security:'Social Security',medicare:'Medicare'};
+  $('tp-preview-rates').innerHTML=Object.entries(p.rates).map(([k,v])=>
+    `<div><span style="color:var(--text-mute)">${rateNames[k]||k}</span> <strong>${(v*100).toFixed(2)}%</strong></div>`
+  ).join('');
+  $('tp-preview-note').textContent=p.description;
+  $('tp-preview').style.display='block';
+}
+
+async function applyTaxProfile(){
+  const id=gv('tp-profile');
+  if(!id){toast('Select an income range first','error');return}
+  if(!confirm('Apply this preset? It will overwrite Federal, State, Social Security, and Medicare rates.'))return;
+  const res=await fetch('/api/tax-profiles/apply/'+id,{method:'POST'});
+  if(!res.ok){const d=await res.json();toast(d.error||'Failed to apply preset','error');return}
+  toast('Tax preset applied','success');
+  loadTaxConfig();
+  $('tp-status').value='';$('tp-profile').innerHTML='<option value="">— select status first —</option>';
+  $('tp-preview').style.display='none';
+}
+
 
 function renderPaycheckCard(p){
   if(!p||!p.period){$('paycheck-card').innerHTML='';return}
