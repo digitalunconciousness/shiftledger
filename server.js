@@ -918,6 +918,58 @@ app.delete('/api/goals/:id', authMiddleware, (req, res) => {
   res.json({ success: true });
 });
 
+app.get('/api/goals/history', authMiddleware, (req, res) => {
+  try {
+    const activeGoals = db.prepare('SELECT * FROM goals WHERE active = 1').all();
+    if (!activeGoals.length) return res.json([]);
+
+    const startDay = getPayWeekStartDay();
+    const now = new Date();
+    const results = [];
+
+    for (const goal of activeGoals) {
+      const periods = [];
+      const count = goal.period === 'weekly' ? 52 : 12;
+
+      if (goal.period === 'weekly') {
+        const daysSinceStart = (now.getDay() - startDay + 7) % 7;
+        const thisWeekStart = new Date(now);
+        thisWeekStart.setDate(now.getDate() - daysSinceStart);
+        thisWeekStart.setHours(0, 0, 0, 0);
+
+        for (let i = 1; i <= count; i++) {
+          const weekStart = new Date(thisWeekStart);
+          weekStart.setDate(weekStart.getDate() - i * 7);
+          const weekEnd = new Date(weekStart);
+          weekEnd.setDate(weekEnd.getDate() + 6);
+          const from = fmt(weekStart), to = fmt(weekEnd);
+          const data = db.prepare(
+            'SELECT COALESCE(SUM(grand_total),0) as earned FROM shifts WHERE date >= ? AND date <= ? AND deleted_at IS NULL'
+          ).get(from, to);
+          periods.push({ from, to, earned: data.earned, achieved: data.earned >= goal.target_amount });
+        }
+      } else if (goal.period === 'monthly') {
+        for (let i = 1; i <= count; i++) {
+          const monthStart = new Date(now.getFullYear(), now.getMonth() - i, 1);
+          const monthEnd = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+          const from = fmt(monthStart), to = fmt(monthEnd);
+          const data = db.prepare(
+            'SELECT COALESCE(SUM(grand_total),0) as earned FROM shifts WHERE date >= ? AND date <= ? AND deleted_at IS NULL'
+          ).get(from, to);
+          periods.push({ from, to, earned: data.earned, achieved: data.earned >= goal.target_amount });
+        }
+      }
+
+      results.push({ goal_id: goal.id, period: goal.period, target_amount: goal.target_amount, history: periods });
+    }
+
+    res.json(results);
+  } catch (e) {
+    logger.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── Summary ──────────────────────────────────────────────────────────────────
 
 app.get('/api/summary', authMiddleware, (req, res) => {
