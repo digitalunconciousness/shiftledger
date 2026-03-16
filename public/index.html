@@ -557,6 +557,8 @@ canvas{max-height:280px}
     <div class="shortcut-row"><span>History</span><span class="shortcut-key">3</span></div>
     <div class="shortcut-row"><span>Reports</span><span class="shortcut-key">4</span></div>
     <div class="shortcut-row"><span>Settings</span><span class="shortcut-key">5</span></div>
+    <div class="shortcut-row"><span>Previous View</span><span class="shortcut-key">&lsqb;</span></div>
+    <div class="shortcut-row"><span>Next View</span><span class="shortcut-key">&rsqb;</span></div>
     <div class="shortcut-row"><span>Save Shift</span><span class="shortcut-key">Ctrl+Enter</span></div>
     <div class="shortcut-row"><span>Close Modal</span><span class="shortcut-key">Esc</span></div>
     <div class="shortcut-row"><span>This Help</span><span class="shortcut-key">?</span></div>
@@ -1237,6 +1239,14 @@ document.addEventListener('keydown',e=>{
   if(idx>=0&&idx<viewKeys.length){
     const navItems=document.querySelectorAll('.nav-item');
     if(navItems[idx])navigate(navItems[idx]);
+  }
+  if(e.key==='['||e.key===']'){
+    const navItems=Array.from(document.querySelectorAll('.nav-item'));
+    if(!navItems.length)return;
+    const cur=navItems.findIndex(n=>n.classList.contains('active'));
+    const base=cur<0?0:cur;
+    const next=e.key===']'?(base+1)%navItems.length:(base-1+navItems.length)%navItems.length;
+    navigate(navItems[next]);
   }
 });
 document.addEventListener('keydown',e=>{
