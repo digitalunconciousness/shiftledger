@@ -21,7 +21,7 @@ Designed to run as a Proxmox LXC container and exposed via Cloudflare Tunnel.
 - **CSV import/export** — data portability for all shifts
 - **Dark/light theme** — toggle in topbar, persisted to localStorage
 - **PWA support** — installable as a mobile app with offline shell caching
-- **Keyboard shortcuts** — `1-5` for views, `Ctrl+Enter` to save, `?` for help overlay
+- **Keyboard shortcuts** — `1-5` for views, `[`/`]` to cycle views, `Ctrl+Enter` to save, `?` for help overlay
 - **Mobile-responsive** — hamburger sidebar, touch-friendly
 
 ---
@@ -90,6 +90,27 @@ Automatic daily backups run at 3 AM. Manual backup:
 ```
 
 Backups stored in `/opt/shiftledger/backups/`, pruned after 30 days.
+
+---
+
+## Keyboard Shortcuts
+
+Press `?` in the app to open the shortcuts overlay at any time.
+
+| Key | Action |
+|---|---|
+| `1` | Log Shift view |
+| `2` | Dashboard view |
+| `3` | Shift History view |
+| `4` | Reports view |
+| `5` | Settings view |
+| `[` | Previous view |
+| `]` | Next view |
+| `Ctrl+Enter` | Save shift (on Log Shift view) |
+| `Esc` | Close modal / overlay |
+| `?` | Toggle this shortcuts overlay |
+
+> **Note:** Shortcuts are disabled when focus is inside a text input, textarea, or select field.
 
 ---
 
