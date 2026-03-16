@@ -100,7 +100,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:1
 .form-group{display:flex;flex-direction:column;gap:6px}
 .form-group.full{grid-column:1/-1}
 label{font-size:.72rem;font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim)}
-input,select,textarea{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:var(--mono);font-size:.9rem;padding:10px 12px;width:100%;transition:.15s;outline:none;-webkit-appearance:none}
+input,select,textarea{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:var(--mono);font-size:.9rem;padding:10px 12px;width:100%;transition:.15s;outline:none;appearance:none;-webkit-appearance:none}
 input:focus,select:focus,textarea:focus{border-color:var(--amber);box-shadow:0 0 0 2px var(--amber-glow)}
 textarea{resize:vertical;min-height:80px}
 select option{background:var(--surface2)}
@@ -293,7 +293,7 @@ canvas{max-height:280px}
           <div class="form-group"><label>Date</label><input type="date" id="f-date"></div>
           <div class="form-group"><label>Job</label><select id="f-job" onchange="onJobChange()"><option value="">— No Job —</option></select></div>
           <div class="form-group"><label>Hourly Rate ($)</label><input type="number" id="f-rate" placeholder="0.00" step="0.25" min="0" oninput="updatePreview()"></div>
-          <div class="form-group"><label>Hours Worked</label><input type="number" id="f-hours" placeholder="0.0" step="0.25" min="0" oninput="updatePreview()"></div>
+          <div class="form-group"><label>Hours Worked</label><input type="number" id="f-hours" placeholder="0.00" step="0.25" min="0" oninput="updatePreview()"></div>
           <div class="form-group"><label>Tip Entry Mode</label>
             <div class="tip-toggle">
               <input type="radio" name="tip-mode" id="tm-total" value="total" checked onchange="updatePreview()"><label for="tm-total">Night Total</label>
@@ -580,6 +580,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   // Restore theme
   const saved=localStorage.getItem('sl_theme');
   if(saved) document.documentElement.dataset.theme=saved;
+  setupDecimalInputs();
   checkAuth();
 });
 
@@ -645,6 +646,12 @@ function sv(id,v){document.getElementById(id).value=v}
 function today(){return new Date().toISOString().split('T')[0]}
 function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
 function $(id){return document.getElementById(id)}
+function formatFixed(value,digits=2){const number=Number(value);return Number.isFinite(number)?number.toFixed(digits):''}
+function formatMoneyTick(value){return '$'+formatFixed(value)}
+function setDecimalValue(id,value,digits=2){if(value===null||value===undefined||value===''){sv(id,'');return}sv(id,formatFixed(value,digits))}
+function formatDecimalInput(input,digits=2){if(!input||input.value==='')return;const number=Number(input.value);if(!Number.isFinite(number))return;input.value=number.toFixed(digits)}
+function attachDecimalInput(id,digits=2){const input=$(id);if(!input)return;input.addEventListener('blur',()=>formatDecimalInput(input,digits))}
+function setupDecimalInputs(){['f-rate','f-hours','f-tips','e-rate','e-hours','e-tips','nj-rate','ng-amount','ntc-rate','ntc-flat','ej-rate','ej-ot-threshold','ej-ot-multiplier'].forEach(id=>attachDecimalInput(id,2))}
 
 // ── Navigation ──
 const viewKeys=['log','dashboard','history','reports','settings'];
@@ -695,7 +702,7 @@ async function loadJobs(){
 function onJobChange(){
   const id=parseInt(gv('f-job'));
   const job=jobsCache.find(j=>j.id===id);
-  if(job&&job.default_rate) sv('f-rate',job.default_rate);
+  if(job&&job.default_rate) setDecimalValue('f-rate',job.default_rate);
   updatePreview();
 }
 
@@ -711,9 +718,9 @@ function loadTemplate(){
   const t=templatesCache.find(x=>x.id===id);
   if(!t)return;
   if(t.job_id)sv('f-job',t.job_id);
-  sv('f-rate',t.hourly_rate);sv('f-hours',t.hours_worked);
+  setDecimalValue('f-rate',t.hourly_rate);setDecimalValue('f-hours',t.hours_worked);
   if(t.tip_mode==='per_hour')$('tm-per-hour').checked=true;else $('tm-total').checked=true;
-  sv('f-tips',t.tip_input);sv('f-notes',t.notes||'');
+  setDecimalValue('f-tips',t.tip_input);sv('f-notes',t.notes||'');
   $('tip-label').textContent=t.tip_mode==='per_hour'?'Tips Per Hour ($)':'Total Tips for Night ($)';
   updatePreview();
 }
@@ -848,7 +855,7 @@ function renderTrendChart(data){
     {label:'Wages',data:data.map(d=>d.total_wages),backgroundColor:'#2a2a2a',borderColor:'#444',borderWidth:1,borderRadius:3},
     {label:'Tips',data:data.map(d=>d.total_tips),backgroundColor:'#1c3a44',borderColor:'#7ecee3',borderWidth:1,borderRadius:3},
     {label:'Total',data:data.map(d=>d.grand_total),type:'line',borderColor:'#f5a623',backgroundColor:'transparent',borderWidth:2,pointBackgroundColor:'#f5a623',pointRadius:3,tension:.3}
-  ]},options:{responsive:true,plugins:{legend:{labels:{color:c.legend,font:{family:'IBM Plex Mono',size:11},boxWidth:12}},tooltip:{backgroundColor:c.tooltip.bg,borderColor:c.tooltip.border,borderWidth:1,titleColor:c.tooltip.title,bodyColor:c.tooltip.body,callbacks:{label:ctx=>` ${ctx.dataset.label}: $${parseFloat(ctx.raw).toFixed(2)}`}}},scales:{x:{ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10}},grid:{color:c.grid}},y:{ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10},callback:v=>'$'+v.toLocaleString()},grid:{color:c.grid}}}}});
+  ]},options:{responsive:true,plugins:{legend:{labels:{color:c.legend,font:{family:'IBM Plex Mono',size:11},boxWidth:12}},tooltip:{backgroundColor:c.tooltip.bg,borderColor:c.tooltip.border,borderWidth:1,titleColor:c.tooltip.title,bodyColor:c.tooltip.body,callbacks:{label:ctx=>` ${ctx.dataset.label}: $${formatFixed(ctx.raw)}`}}},scales:{x:{ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10}},grid:{color:c.grid}},y:{ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10},callback:v=>formatMoneyTick(v)},grid:{color:c.grid}}}}});
 }
 
 function renderBreakdownChart(data){
@@ -856,17 +863,17 @@ function renderBreakdownChart(data){
   breakdownChart=new Chart(ctx,{type:'bar',data:{labels:formatLabels(data),datasets:[
     {label:'Wages',data:data.map(d=>d.total_wages),backgroundColor:'#2e2e2e',borderRadius:2},
     {label:'Tips',data:data.map(d=>d.total_tips),backgroundColor:'#1c3a44',borderRadius:2}
-  ]},options:{responsive:true,plugins:{legend:{labels:{color:c.legend,font:{family:'IBM Plex Mono',size:11},boxWidth:12}},tooltip:{backgroundColor:c.tooltip.bg,borderColor:c.tooltip.border,borderWidth:1,titleColor:c.tooltip.title,bodyColor:c.tooltip.body,callbacks:{label:ctx=>` ${ctx.dataset.label}: $${parseFloat(ctx.raw).toFixed(2)}`}}},scales:{x:{stacked:true,ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10}},grid:{color:c.grid}},y:{stacked:true,ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10},callback:v=>'$'+v.toLocaleString()},grid:{color:c.grid}}}}});
+  ]},options:{responsive:true,plugins:{legend:{labels:{color:c.legend,font:{family:'IBM Plex Mono',size:11},boxWidth:12}},tooltip:{backgroundColor:c.tooltip.bg,borderColor:c.tooltip.border,borderWidth:1,titleColor:c.tooltip.title,bodyColor:c.tooltip.body,callbacks:{label:ctx=>` ${ctx.dataset.label}: $${formatFixed(ctx.raw)}`}}},scales:{x:{stacked:true,ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10}},grid:{color:c.grid}},y:{stacked:true,ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10},callback:v=>formatMoneyTick(v)},grid:{color:c.grid}}}}});
 }
 
 function renderTipRatioChart(data){
   const ctx=$('tipratio-chart').getContext('2d');if(tipRatioChart)tipRatioChart.destroy();const c=chartColors();
-  tipRatioChart=new Chart(ctx,{type:'line',data:{labels:data.map(d=>{const[y,m]=d.period.split('-');return new Date(y,m-1).toLocaleDateString('en-US',{month:'short',year:'2-digit'})}),datasets:[{label:'Tip %',data:data.map(d=>d.tip_pct),borderColor:'#7ecee3',backgroundColor:'rgba(126,206,227,0.1)',fill:true,borderWidth:2,pointRadius:3,tension:.3}]},options:{responsive:true,plugins:{legend:{labels:{color:c.legend,font:{family:'IBM Plex Mono',size:11},boxWidth:12}},tooltip:{backgroundColor:c.tooltip.bg,borderColor:c.tooltip.border,borderWidth:1,titleColor:c.tooltip.title,bodyColor:c.tooltip.body,callbacks:{label:ctx=>` ${ctx.raw}%`}}},scales:{x:{ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10}},grid:{color:c.grid}},y:{ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10},callback:v=>v+'%'},grid:{color:c.grid}}}}});
+  tipRatioChart=new Chart(ctx,{type:'line',data:{labels:data.map(d=>{const[y,m]=d.period.split('-');return new Date(y,m-1).toLocaleDateString('en-US',{month:'short',year:'2-digit'})}),datasets:[{label:'Tip %',data:data.map(d=>d.tip_pct),borderColor:'#7ecee3',backgroundColor:'rgba(126,206,227,0.1)',fill:true,borderWidth:2,pointRadius:3,tension:.3}]},options:{responsive:true,plugins:{legend:{labels:{color:c.legend,font:{family:'IBM Plex Mono',size:11},boxWidth:12}},tooltip:{backgroundColor:c.tooltip.bg,borderColor:c.tooltip.border,borderWidth:1,titleColor:c.tooltip.title,bodyColor:c.tooltip.body,callbacks:{label:ctx=>` ${formatFixed(ctx.raw)}%`}}},scales:{x:{ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10}},grid:{color:c.grid}},y:{ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10},callback:v=>formatFixed(v)+'%'},grid:{color:c.grid}}}}});
 }
 
 function renderEffRateChart(data){
   const ctx=$('effrate-chart').getContext('2d');if(effRateChart)effRateChart.destroy();const c=chartColors();
-  effRateChart=new Chart(ctx,{type:'line',data:{labels:formatLabels(data),datasets:[{label:'Effective $/Hr',data:data.map(d=>d.effective_rate),borderColor:'#3ecf8e',backgroundColor:'rgba(62,207,142,0.1)',fill:true,borderWidth:2,pointRadius:3,tension:.3}]},options:{responsive:true,plugins:{legend:{labels:{color:c.legend,font:{family:'IBM Plex Mono',size:11},boxWidth:12}},tooltip:{backgroundColor:c.tooltip.bg,borderColor:c.tooltip.border,borderWidth:1,titleColor:c.tooltip.title,bodyColor:c.tooltip.body,callbacks:{label:ctx=>` $${parseFloat(ctx.raw).toFixed(2)}/hr`}}},scales:{x:{ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10}},grid:{color:c.grid}},y:{ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10},callback:v=>'$'+v},grid:{color:c.grid}}}}});
+  effRateChart=new Chart(ctx,{type:'line',data:{labels:formatLabels(data),datasets:[{label:'Effective $/Hr',data:data.map(d=>d.effective_rate),borderColor:'#3ecf8e',backgroundColor:'rgba(62,207,142,0.1)',fill:true,borderWidth:2,pointRadius:3,tension:.3}]},options:{responsive:true,plugins:{legend:{labels:{color:c.legend,font:{family:'IBM Plex Mono',size:11},boxWidth:12}},tooltip:{backgroundColor:c.tooltip.bg,borderColor:c.tooltip.border,borderWidth:1,titleColor:c.tooltip.title,bodyColor:c.tooltip.body,callbacks:{label:ctx=>` $${formatFixed(ctx.raw)}/hr`}}},scales:{x:{ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10}},grid:{color:c.grid}},y:{ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10},callback:v=>formatMoneyTick(v)},grid:{color:c.grid}}}}});
 }
 
 // ── History ──
@@ -921,8 +928,8 @@ async function restoreShift(id,btn){
 
 // ── Edit Modal ──
 function openEditModal(s){
-  sv('e-id',s.id);sv('e-date',s.date);sv('e-rate',s.hourly_rate);sv('e-hours',s.hours_worked);
-  sv('e-tipmode',s.tip_mode);sv('e-tips',s.tip_input);sv('e-notes',s.notes||'');
+  sv('e-id',s.id);sv('e-date',s.date);setDecimalValue('e-rate',s.hourly_rate);setDecimalValue('e-hours',s.hours_worked);
+  sv('e-tipmode',s.tip_mode);setDecimalValue('e-tips',s.tip_input);sv('e-notes',s.notes||'');
   sv('e-job',s.job_id||'');
   $('edit-modal').classList.add('open');
 }
@@ -1012,6 +1019,7 @@ async function loadTaxConfig(){
       </div>
     </div>
   `).join('');
+  taxes.forEach(t=>{attachDecimalInput('tcr-'+t.id,2);attachDecimalInput('tcf-'+t.id,2)});
 }
 
 async function saveTaxRate(id){
@@ -1122,9 +1130,9 @@ async function editJob(id){
   const jobs=await fetch('/api/jobs').then(r=>r.json());
   const j=jobs.find(x=>x.id===id);
   if(!j){toast('Job not found','error');return}
-  sv('ej-id',j.id);sv('ej-name',j.name);sv('ej-rate',j.default_rate);
+  sv('ej-id',j.id);sv('ej-name',j.name);setDecimalValue('ej-rate',j.default_rate);
   $('ej-color').value=j.color||'#f5a623';
-  sv('ej-ot-threshold',j.overtime_threshold||40);sv('ej-ot-multiplier',j.overtime_multiplier||1.5);$('ej-tip-payment').value=j.tip_payment||'cash';
+  setDecimalValue('ej-ot-threshold',j.overtime_threshold||40);setDecimalValue('ej-ot-multiplier',j.overtime_multiplier||1.5);$('ej-tip-payment').value=j.tip_payment||'cash';
   $('job-edit-modal').classList.add('open');
 }
 
