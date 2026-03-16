@@ -654,6 +654,238 @@ app.put('/api/settings', authMiddleware, adminOnly, (req, res) => {
   }
 });
 
+// ── Tax Profile Presets ───────────────────────────────────────────────────────
+// Effective federal tax rates are practical budgeting presets (not filing-grade
+// tax prep values). Social Security (6.2%) and Medicare (1.45%) are flat
+// employee rates. State rates are national-average placeholders.
+//
+// This app can auto-refresh baseline tax_config rates every six months
+// (Jan 1 and Jul 1) from the year table below.
+
+const TAX_BASELINE_BY_YEAR = {
+  // Keep 2025 rates for historical compatibility.
+  2025: {
+    federal: 0.22,
+    state: 0.05,
+    social_security: 0.062,
+    medicare: 0.0145,
+    tip_tax: 0.153,
+  },
+  // Current-year baseline (can be updated each year as needed).
+  2026: {
+    federal: 0.22,
+    state: 0.05,
+    social_security: 0.062,
+    medicare: 0.0145,
+    tip_tax: 0.153,
+  },
+};
+
+function getApplicableTaxBaseline(year = new Date().getFullYear()) {
+  const availableYears = Object.keys(TAX_BASELINE_BY_YEAR).map(Number).sort((a, b) => a - b);
+  const fallbackYear = availableYears[availableYears.length - 1];
+  const selectedYear = availableYears.filter(y => y <= year).pop() || fallbackYear;
+  return { year: selectedYear, rates: TAX_BASELINE_BY_YEAR[selectedYear] };
+}
+
+function getNextSemiAnnualDate(fromDate = new Date()) {
+  const y = fromDate.getFullYear();
+  const jan = new Date(y, 0, 1, 0, 0, 0, 0);
+  const jul = new Date(y, 6, 1, 0, 0, 0, 0);
+  if (fromDate < jan) return jan;
+  if (fromDate < jul) return jul;
+  return new Date(y + 1, 0, 1, 0, 0, 0, 0);
+}
+
+function applyBaselineTaxRates(rates) {
+  const updateRate = db.prepare('UPDATE tax_config SET rate = ? WHERE key = ?');
+  const keyAliases = {
+    federal_tax: 'federal',
+    state_tax: 'state',
+    social_security_tax: 'social_security',
+    medicare_tax: 'medicare',
+    tip_tax: 'tip_tax',
+  };
+  const tx = db.transaction(() => {
+    for (const [baselineKey, rate] of Object.entries(rates)) {
+      const key = keyAliases[baselineKey] || baselineKey;
+      updateRate.run(rate, key);
+    }
+  });
+  tx();
+}
+
+function autoRefreshTaxRates(force = false) {
+  // Admins can disable auto refresh by setting meta key to 0.
+  const enabledRow = db.prepare("SELECT value FROM meta WHERE key = 'tax_auto_refresh_enabled'").get();
+  const enabled = enabledRow ? enabledRow.value !== '0' : true;
+  if (!enabled && !force) return { refreshed: false, reason: 'disabled' };
+
+  const now = new Date();
+  const nextRow = db.prepare("SELECT value FROM meta WHERE key = 'tax_auto_refresh_next'").get();
+  const nextAt = nextRow ? new Date(nextRow.value) : null;
+  const due = force || !nextAt || Number.isNaN(nextAt.getTime()) || now >= nextAt;
+
+  if (!due) {
+    return { refreshed: false, reason: 'not_due', next_at: nextAt.toISOString() };
+  }
+
+  const baseline = getApplicableTaxBaseline(now.getFullYear());
+  applyBaselineTaxRates(baseline.rates);
+
+  const nextRefresh = getNextSemiAnnualDate(new Date(now.getTime() + 24 * 60 * 60 * 1000));
+  const setMeta = db.prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)');
+  const tx = db.transaction(() => {
+    setMeta.run('tax_auto_refresh_last', now.toISOString());
+    setMeta.run('tax_auto_refresh_next', nextRefresh.toISOString());
+    setMeta.run('tax_profile_year_active', String(baseline.year));
+    // Ensure the switch exists for future admin control.
+    setMeta.run('tax_auto_refresh_enabled', enabled ? '1' : '0');
+  });
+  tx();
+
+  logger.info({ year: baseline.year, nextRefresh: nextRefresh.toISOString() }, 'Tax rates auto-refreshed');
+  return { refreshed: true, year: baseline.year, next_at: nextRefresh.toISOString() };
+}
+
+const TAX_PROFILES = [
+  // ── Single filer, no dependents ─────────────────────────────────────────
+  {
+    id: 'single_25k',
+    filing_status: 'Single',
+    income_range: '~$20k–$30k/yr',
+    label: 'Single, ~$25k/yr – no dependents',
+    approx_annual_income: 25000,
+    description: 'Single filer, no dependents. Est. $25,000 annual gross income.',
+    // Taxable: $25k − $15k deduction = $10k  →  10% × $10k = $1,000  →  eff. 4%
+    rates: { federal: 0.04, state: 0.05, social_security: 0.062, medicare: 0.0145 },
+  },
+  {
+    id: 'single_35k',
+    filing_status: 'Single',
+    income_range: '~$30k–$42k/yr',
+    label: 'Single, ~$35k/yr – no dependents',
+    approx_annual_income: 35000,
+    description: 'Single filer, no dependents. Est. $35,000 annual gross income.',
+    // Taxable: $20k  →  10%×$11,925 + 12%×$8,075 = $2,161  →  eff. 6%
+    rates: { federal: 0.06, state: 0.05, social_security: 0.062, medicare: 0.0145 },
+  },
+  {
+    id: 'single_50k',
+    filing_status: 'Single',
+    income_range: '~$42k–$60k/yr',
+    label: 'Single, ~$50k/yr – no dependents',
+    approx_annual_income: 50000,
+    description: 'Single filer, no dependents. Est. $50,000 annual gross income.',
+    // Taxable: $35k  →  10%×$11,925 + 12%×$23,075 = $3,962  →  eff. ~8%
+    rates: { federal: 0.08, state: 0.05, social_security: 0.062, medicare: 0.0145 },
+  },
+  {
+    id: 'single_65k',
+    filing_status: 'Single',
+    income_range: '~$60k–$75k/yr',
+    label: 'Single, ~$65k/yr – no dependents',
+    approx_annual_income: 65000,
+    description: 'Single filer, no dependents. Est. $65,000 annual gross income.',
+    // Taxable: $50k  →  ... + 22%×$1,525 = $5,914  →  eff. ~9%
+    rates: { federal: 0.09, state: 0.05, social_security: 0.062, medicare: 0.0145 },
+  },
+  // ── Head of Household (single with dependents) ───────────────────────────
+  {
+    id: 'hoh_30k',
+    filing_status: 'Head of Household',
+    income_range: '~$25k–$38k/yr',
+    label: 'Head of Household, ~$30k/yr',
+    approx_annual_income: 30000,
+    description: 'Head of household (single with dependents). Est. $30,000 annual gross income.',
+    // Taxable: $30k − $22,500 deduction = $7,500  →  10% × $7,500 = $750  →  eff. ~3%
+    rates: { federal: 0.03, state: 0.05, social_security: 0.062, medicare: 0.0145 },
+  },
+  {
+    id: 'hoh_45k',
+    filing_status: 'Head of Household',
+    income_range: '~$38k–$55k/yr',
+    label: 'Head of Household, ~$45k/yr',
+    approx_annual_income: 45000,
+    description: 'Head of household (single with dependents). Est. $45,000 annual gross income.',
+    // Taxable: $22,500  →  10%×$16,550 + 12%×$5,950 = $2,369  →  eff. ~5%
+    rates: { federal: 0.05, state: 0.05, social_security: 0.062, medicare: 0.0145 },
+  },
+  // ── Married Filing Jointly ───────────────────────────────────────────────
+  {
+    id: 'mfj_50k',
+    filing_status: 'Married Filing Jointly',
+    income_range: '~$40k–$65k/yr combined',
+    label: 'Married Filing Jointly, ~$50k/yr combined',
+    approx_annual_income: 50000,
+    description: 'Married filing jointly. Est. $50,000 combined annual gross income.',
+    // Taxable: $50k − $30k deduction = $20k  →  10% × $20k = $2,000  →  eff. 4%
+    rates: { federal: 0.04, state: 0.05, social_security: 0.062, medicare: 0.0145 },
+  },
+  {
+    id: 'mfj_80k',
+    filing_status: 'Married Filing Jointly',
+    income_range: '~$65k–$100k/yr combined',
+    label: 'Married Filing Jointly, ~$80k/yr combined',
+    approx_annual_income: 80000,
+    description: 'Married filing jointly. Est. $80,000 combined annual gross income.',
+    // Taxable: $50k  →  10%×$23,850 + 12%×$26,150 = $5,523  →  eff. ~7%
+    rates: { federal: 0.07, state: 0.05, social_security: 0.062, medicare: 0.0145 },
+  },
+];
+
+// Metadata about the preset rate data
+function getTaxProfilesMeta() {
+  const activeYearRow = db.prepare("SELECT value FROM meta WHERE key = 'tax_profile_year_active'").get();
+  const lastRow = db.prepare("SELECT value FROM meta WHERE key = 'tax_auto_refresh_last'").get();
+  const nextRow = db.prepare("SELECT value FROM meta WHERE key = 'tax_auto_refresh_next'").get();
+
+  return {
+    tax_year: activeYearRow ? parseInt(activeYearRow.value, 10) : getApplicableTaxBaseline().year,
+    last_updated: lastRow ? lastRow.value : null,
+    next_auto_refresh: nextRow ? nextRow.value : null,
+    refresh_policy: 'Automatically refreshes baseline rates every 6 months (Jan 1 / Jul 1).',
+    sources: [
+      'App-maintained baseline rate table in server.js (TAX_BASELINE_BY_YEAR)',
+      'Update this table when new annual IRS/state guidance is published.',
+    ],
+    note: 'State rates shown are approximate national averages. Adjust to your state.',
+  };
+}
+
+// Ensure baseline rates are current on boot.
+autoRefreshTaxRates(false);
+
+app.get('/api/tax-profiles', authMiddleware, (req, res) => {
+  res.json({ profiles: TAX_PROFILES, meta: getTaxProfilesMeta() });
+});
+
+app.post('/api/tax-profiles/refresh', authMiddleware, adminOnly, (req, res) => {
+  try {
+    const result = autoRefreshTaxRates(true);
+    res.json({ success: true, ...result, meta: getTaxProfilesMeta() });
+  } catch (e) {
+    logger.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/tax-profiles/apply/:profileId', authMiddleware, adminOnly, (req, res) => {
+  const profile = TAX_PROFILES.find(p => p.id === req.params.profileId);
+  if (!profile) return res.status(404).json({ error: 'Profile not found' });
+
+  const update = db.prepare('UPDATE tax_config SET rate = ? WHERE key = ?');
+  const results = {};
+  const tx = db.transaction(() => {
+    for (const [key, rate] of Object.entries(profile.rates)) {
+      const info = update.run(rate, key);
+      results[key] = info.changes > 0 ? 'updated' : 'not_found';
+    }
+  });
+  tx();
+  res.json({ success: true, profile: profile.id, applied: results });
+});
+
 // ── Tax Config Routes ─────────────────────────────────────────────────────────
 
 app.get('/api/tax-config', authMiddleware, (req, res) => {
