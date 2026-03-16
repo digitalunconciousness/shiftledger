@@ -1219,7 +1219,28 @@ document.addEventListener('keydown',e=>{
 });
 
 // ── Service Worker ──
-if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{})}
+if('serviceWorker' in navigator){
+  let refreshing=false;
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{
+    if(refreshing)return;
+    refreshing=true;
+    window.location.reload();
+  });
+
+  navigator.serviceWorker.register('/sw.js').then(reg=>{
+    if(reg.waiting) reg.waiting.postMessage({type:'SKIP_WAITING'});
+    reg.addEventListener('updatefound',()=>{
+      const newWorker=reg.installing;
+      if(!newWorker) return;
+      newWorker.addEventListener('statechange',()=>{
+        if(newWorker.state==='installed'&&navigator.serviceWorker.controller){
+          const waitingWorker=reg.waiting||newWorker;
+          waitingWorker.postMessage({type:'SKIP_WAITING'});
+        }
+      });
+    });
+  }).catch(()=>{});
+}
 </script>
 </body>
 </html>
