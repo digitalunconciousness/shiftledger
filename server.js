@@ -655,17 +655,98 @@ app.put('/api/settings', authMiddleware, adminOnly, (req, res) => {
 });
 
 // ── Tax Profile Presets ───────────────────────────────────────────────────────
-// Effective federal tax rates computed from 2025 IRS tax brackets and standard
-// deductions. Social Security (6.2%) and Medicare (1.45%) are flat employee
-// rates per IRS Publication 15. State rates are national averages — users
-// should adjust to their own state. Update this data annually when IRS
-// publishes new inflation-adjusted brackets (typically November).
+// Effective federal tax rates are practical budgeting presets (not filing-grade
+// tax prep values). Social Security (6.2%) and Medicare (1.45%) are flat
+// employee rates. State rates are national-average placeholders.
 //
-// Sources:
-//   Federal brackets: IRS Rev. Proc. 2024-40 (tax year 2025)
-//   SS wage base:     IRS News Release IR-2024-273 ($176,100 for 2025)
-//   Standard deductions: IRS Rev. Proc. 2024-40
-//     Single: $15,000 | MFJ: $30,000 | Head of Household: $22,500
+// This app can auto-refresh baseline tax_config rates every six months
+// (Jan 1 and Jul 1) from the year table below.
+
+const TAX_BASELINE_BY_YEAR = {
+  // Keep 2025 rates for historical compatibility.
+  2025: {
+    federal: 0.22,
+    state: 0.05,
+    social_security: 0.062,
+    medicare: 0.0145,
+    tip_tax: 0.153,
+  },
+  // Current-year baseline (can be updated each year as needed).
+  2026: {
+    federal: 0.22,
+    state: 0.05,
+    social_security: 0.062,
+    medicare: 0.0145,
+    tip_tax: 0.153,
+  },
+};
+
+function getApplicableTaxBaseline(year = new Date().getFullYear()) {
+  const availableYears = Object.keys(TAX_BASELINE_BY_YEAR).map(Number).sort((a, b) => a - b);
+  const fallbackYear = availableYears[availableYears.length - 1];
+  const selectedYear = availableYears.filter(y => y <= year).pop() || fallbackYear;
+  return { year: selectedYear, rates: TAX_BASELINE_BY_YEAR[selectedYear] };
+}
+
+function getNextSemiAnnualDate(fromDate = new Date()) {
+  const y = fromDate.getFullYear();
+  const jan = new Date(y, 0, 1, 0, 0, 0, 0);
+  const jul = new Date(y, 6, 1, 0, 0, 0, 0);
+  if (fromDate < jan) return jan;
+  if (fromDate < jul) return jul;
+  return new Date(y + 1, 0, 1, 0, 0, 0, 0);
+}
+
+function applyBaselineTaxRates(rates) {
+  const updateRate = db.prepare('UPDATE tax_config SET rate = ? WHERE key = ?');
+  const keyAliases = {
+    federal_tax: 'federal',
+    state_tax: 'state',
+    social_security_tax: 'social_security',
+    medicare_tax: 'medicare',
+    tip_tax: 'tip_tax',
+  };
+  const tx = db.transaction(() => {
+    for (const [baselineKey, rate] of Object.entries(rates)) {
+      const key = keyAliases[baselineKey] || baselineKey;
+      updateRate.run(rate, key);
+    }
+  });
+  tx();
+}
+
+function autoRefreshTaxRates(force = false) {
+  // Admins can disable auto refresh by setting meta key to 0.
+  const enabledRow = db.prepare("SELECT value FROM meta WHERE key = 'tax_auto_refresh_enabled'").get();
+  const enabled = enabledRow ? enabledRow.value !== '0' : true;
+  if (!enabled && !force) return { refreshed: false, reason: 'disabled' };
+
+  const now = new Date();
+  const nextRow = db.prepare("SELECT value FROM meta WHERE key = 'tax_auto_refresh_next'").get();
+  const nextAt = nextRow ? new Date(nextRow.value) : null;
+  const due = force || !nextAt || Number.isNaN(nextAt.getTime()) || now >= nextAt;
+
+  if (!due) {
+    return { refreshed: false, reason: 'not_due', next_at: nextAt.toISOString() };
+  }
+
+  const baseline = getApplicableTaxBaseline(now.getFullYear());
+  applyBaselineTaxRates(baseline.rates);
+
+  const nextRefresh = getNextSemiAnnualDate(new Date(now.getTime() + 24 * 60 * 60 * 1000));
+  const setMeta = db.prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)');
+  const tx = db.transaction(() => {
+    setMeta.run('tax_auto_refresh_last', now.toISOString());
+    setMeta.run('tax_auto_refresh_next', nextRefresh.toISOString());
+    setMeta.run('tax_profile_year_active', String(baseline.year));
+    // Ensure the switch exists for future admin control.
+    setMeta.run('tax_auto_refresh_enabled', enabled ? '1' : '0');
+  });
+  tx();
+
+  logger.info({ year: baseline.year, nextRefresh: nextRefresh.toISOString() }, 'Tax rates auto-refreshed');
+  return { refreshed: true, year: baseline.year, next_at: nextRefresh.toISOString() };
+}
 
 const TAX_PROFILES = [
   // ── Single filer, no dependents ─────────────────────────────────────────
@@ -754,18 +835,39 @@ const TAX_PROFILES = [
 ];
 
 // Metadata about the preset rate data
-const TAX_PROFILES_META = {
-  tax_year: 2025,
-  last_updated: '2024-11-01',
-  sources: [
-    'IRS Rev. Proc. 2024-40 (2025 tax year brackets & standard deductions)',
-    'IRS News Release IR-2024-273 (2025 Social Security wage base)',
-  ],
-  note: 'State rates shown are approximate national averages. Adjust to your state.',
-};
+function getTaxProfilesMeta() {
+  const activeYearRow = db.prepare("SELECT value FROM meta WHERE key = 'tax_profile_year_active'").get();
+  const lastRow = db.prepare("SELECT value FROM meta WHERE key = 'tax_auto_refresh_last'").get();
+  const nextRow = db.prepare("SELECT value FROM meta WHERE key = 'tax_auto_refresh_next'").get();
+
+  return {
+    tax_year: activeYearRow ? parseInt(activeYearRow.value, 10) : getApplicableTaxBaseline().year,
+    last_updated: lastRow ? lastRow.value : null,
+    next_auto_refresh: nextRow ? nextRow.value : null,
+    refresh_policy: 'Automatically refreshes baseline rates every 6 months (Jan 1 / Jul 1).',
+    sources: [
+      'App-maintained baseline rate table in server.js (TAX_BASELINE_BY_YEAR)',
+      'Update this table when new annual IRS/state guidance is published.',
+    ],
+    note: 'State rates shown are approximate national averages. Adjust to your state.',
+  };
+}
+
+// Ensure baseline rates are current on boot.
+autoRefreshTaxRates(false);
 
 app.get('/api/tax-profiles', authMiddleware, (req, res) => {
-  res.json({ profiles: TAX_PROFILES, meta: TAX_PROFILES_META });
+  res.json({ profiles: TAX_PROFILES, meta: getTaxProfilesMeta() });
+});
+
+app.post('/api/tax-profiles/refresh', authMiddleware, adminOnly, (req, res) => {
+  try {
+    const result = autoRefreshTaxRates(true);
+    res.json({ success: true, ...result, meta: getTaxProfilesMeta() });
+  } catch (e) {
+    logger.error(e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.post('/api/tax-profiles/apply/:profileId', authMiddleware, adminOnly, (req, res) => {

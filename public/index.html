@@ -516,6 +516,10 @@ canvas{max-height:280px}
             <div id="tp-preview-note" style="font-size:.72rem;color:var(--text-mute);margin-bottom:10px"></div>
             <button class="btn btn-primary btn-sm" onclick="applyTaxProfile()">Apply Preset</button>
           </div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+            <button class="btn btn-ghost btn-sm" id="tp-refresh-btn" onclick="refreshTaxBaselineNow()">Refresh Baseline Now</button>
+            <span id="tp-refresh-status" style="font-size:.68rem;color:var(--text-mute);font-family:var(--mono)"></span>
+          </div>
           <div style="font-size:.68rem;color:var(--text-mute);font-family:var(--mono);margin-top:8px" id="tp-meta-line"></div>
         </div>
         <!-- Tax & Deduction Rates -->
@@ -1137,6 +1141,30 @@ async function loadTaxProfiles(){
   const el=$('tp-meta-line');
   if(el)el.textContent=`Based on ${m.tax_year} IRS brackets · last updated ${m.last_updated} · ${m.note}`;
   return taxProfilesData;
+}
+
+async function refreshTaxBaselineNow(){
+  if(!currentUser||!currentUser.is_admin)return;
+  if(!confirm('Refresh baseline tax rates now? This will overwrite current Federal, State, Social Security, Medicare, and Tip Tax rates.'))return;
+  const btn=$('tp-refresh-btn');
+  const status=$('tp-refresh-status');
+  const oldLabel=btn?btn.textContent:'';
+  try{
+    if(btn){btn.disabled=true;btn.textContent='Refreshing...'}
+    if(status)status.textContent='';
+    const res=await fetch('/api/tax-profiles/refresh',{method:'POST'});
+    const data=await res.json();
+    if(!res.ok){toast(data.error||'Failed to refresh baseline','error');return}
+    taxProfilesData=null;
+    await loadTaxProfiles();
+    await loadTaxConfig();
+    if(status)status.textContent=`Updated ${new Date().toLocaleString()} · next ${data.meta.next_auto_refresh}`;
+    toast(`Tax baseline refreshed (${data.meta.tax_year})`,'success');
+  }catch(e){
+    toast('Failed to refresh baseline','error');
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent=oldLabel||'Refresh Baseline Now'}
+  }
 }
 
 async function filterTaxProfiles(){
