@@ -925,11 +925,11 @@ app.get('/api/goals/history', authMiddleware, (req, res) => {
 
     const startDay = getPayWeekStartDay();
     const now = new Date();
-    const count = 12;
     const results = [];
 
     for (const goal of activeGoals) {
       const periods = [];
+      const count = goal.period === 'weekly' ? 52 : 12;
 
       if (goal.period === 'weekly') {
         const daysSinceStart = (now.getDay() - startDay + 7) % 7;
