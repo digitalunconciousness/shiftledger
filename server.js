@@ -923,13 +923,26 @@ app.get('/api/goals/history', authMiddleware, (req, res) => {
     const activeGoals = db.prepare('SELECT * FROM goals WHERE active = 1').all();
     if (!activeGoals.length) return res.json([]);
 
+    const filterUser = parseInt(req.query.user_id, 10);
+    const hasUserFilter = Number.isInteger(filterUser) && filterUser > 0;
+    const shiftWhere = hasUserFilter ? 'deleted_at IS NULL AND user_id = ?' : 'deleted_at IS NULL';
+    const filterParams = hasUserFilter ? [filterUser] : [];
+
     const startDay = getPayWeekStartDay();
     const now = new Date();
     const results = [];
 
+    const firstShiftRow = db.prepare(`SELECT MIN(date) as min_date FROM shifts WHERE ${shiftWhere}`).get(...filterParams);
+    const firstShiftDate = firstShiftRow && firstShiftRow.min_date
+      ? new Date(firstShiftRow.min_date + 'T00:00:00')
+      : null;
+
+    const weeklyEarnedStmt = db.prepare(
+      `SELECT COALESCE(SUM(grand_total),0) as earned FROM shifts WHERE date >= ? AND date <= ? AND ${shiftWhere}`
+    );
+
     for (const goal of activeGoals) {
       const periods = [];
-      const count = goal.period === 'weekly' ? 52 : 12;
 
       if (goal.period === 'weekly') {
         const daysSinceStart = (now.getDay() - startDay + 7) % 7;
@@ -937,25 +950,39 @@ app.get('/api/goals/history', authMiddleware, (req, res) => {
         thisWeekStart.setDate(now.getDate() - daysSinceStart);
         thisWeekStart.setHours(0, 0, 0, 0);
 
-        for (let i = 1; i <= count; i++) {
-          const weekStart = new Date(thisWeekStart);
-          weekStart.setDate(weekStart.getDate() - i * 7);
+        let oldestWeekStart = new Date(thisWeekStart);
+        if (firstShiftDate) {
+          oldestWeekStart = new Date(firstShiftDate);
+          const offset = (oldestWeekStart.getDay() - startDay + 7) % 7;
+          oldestWeekStart.setDate(oldestWeekStart.getDate() - offset);
+          oldestWeekStart.setHours(0, 0, 0, 0);
+        }
+
+        for (let weekStart = new Date(thisWeekStart); weekStart >= oldestWeekStart; weekStart.setDate(weekStart.getDate() - 7)) {
           const weekEnd = new Date(weekStart);
           weekEnd.setDate(weekEnd.getDate() + 6);
           const from = fmt(weekStart), to = fmt(weekEnd);
-          const data = db.prepare(
-            'SELECT COALESCE(SUM(grand_total),0) as earned FROM shifts WHERE date >= ? AND date <= ? AND deleted_at IS NULL'
-          ).get(from, to);
+          const data = weeklyEarnedStmt.get(from, to, ...filterParams);
           periods.push({ from, to, earned: data.earned, achieved: data.earned >= goal.target_amount });
         }
       } else if (goal.period === 'monthly') {
-        for (let i = 1; i <= count; i++) {
-          const monthStart = new Date(now.getFullYear(), now.getMonth() - i, 1);
-          const monthEnd = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+        const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        thisMonthStart.setHours(0, 0, 0, 0);
+
+        let oldestMonthStart = new Date(thisMonthStart);
+        if (firstShiftDate) {
+          oldestMonthStart = new Date(firstShiftDate.getFullYear(), firstShiftDate.getMonth(), 1);
+          oldestMonthStart.setHours(0, 0, 0, 0);
+        }
+
+        const monthlyEarnedStmt = db.prepare(
+          `SELECT COALESCE(SUM(grand_total),0) as earned FROM shifts WHERE date >= ? AND date <= ? AND ${shiftWhere}`
+        );
+
+        for (let monthStart = new Date(thisMonthStart); monthStart >= oldestMonthStart; monthStart.setMonth(monthStart.getMonth() - 1)) {
+          const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0);
           const from = fmt(monthStart), to = fmt(monthEnd);
-          const data = db.prepare(
-            'SELECT COALESCE(SUM(grand_total),0) as earned FROM shifts WHERE date >= ? AND date <= ? AND deleted_at IS NULL'
-          ).get(from, to);
+          const data = monthlyEarnedStmt.get(from, to, ...filterParams);
           periods.push({ from, to, earned: data.earned, achieved: data.earned >= goal.target_amount });
         }
       }
