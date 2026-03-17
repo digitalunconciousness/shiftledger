@@ -1,0 +1,1 @@
+{\n  "name": "shiftledger-mobile",\n  "version": "1.0.0",\n  "private": true,\n  "dependencies": {\n    "react": "17.0.1",\n    "react-native": "0.64.0",\n    "expo": "41.0.1"\n  },\n  "scripts": {\n    "start": "expo start",\n    "android": "expo run:android",\n    "ios": "expo run:ios"\n  }\n}
