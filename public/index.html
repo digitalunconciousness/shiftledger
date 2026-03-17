@@ -5,9 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ShiftLedger</title>
 <link rel="manifest" href="/manifest.json">
+<link rel="dns-prefetch" href="https://fonts.googleapis.com">
+<link rel="dns-prefetch" href="https://cdnjs.cloudflare.com">
 <link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=Syne:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" defer></script>
 <style>
 /* ── Theme Variables ── */
 [data-theme="dark"] {
@@ -193,7 +196,11 @@ canvas{max-height:280px}
 /* ── Scrollbar ── */
 ::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#333;border-radius:99px}::-webkit-scrollbar-thumb:hover{background:#555}
 
-/* ── Responsive ── */
+/* ── Skip Link (Accessibility) ── */
+.skip-link{position:absolute;left:-999px;top:auto;width:1px;height:1px;overflow:hidden;z-index:-1;background:var(--amber);color:#0a0a0a;padding:8px 16px;border-radius:var(--radius);font-family:var(--mono);font-size:.85rem;font-weight:600;text-decoration:none}
+.skip-link:focus{left:16px;top:16px;width:auto;height:auto;z-index:9999}
+
+/* ── Responsive – Tablet (≤ 768 px) ── */
 @media(max-width:768px){
   .shell.active{grid-template-columns:1fr}
   .sidebar{position:fixed;left:-220px;height:100vh;top:0;z-index:150;transition:left .2s;padding-top:70px}
@@ -202,13 +209,44 @@ canvas{max-height:280px}
   .hamburger{display:block}
   .main{padding:20px 16px}
   .form-grid{grid-template-columns:1fr}
-  .preview-box{grid-template-columns:1fr}
+  .preview-box{grid-template-columns:1fr 1fr}
   .summary-grid{grid-template-columns:1fr 1fr}
   .heatmap{grid-template-columns:repeat(4,1fr)}
+  .topbar{padding:0 16px}
+  .topbar-date{display:none}
+  .chart-card{padding:16px}
+  .nav-item{padding:12px 20px;min-height:44px}
+  .period-tabs{flex-wrap:wrap}
+  .toast-container{bottom:16px;right:16px;left:16px}
+  .toast{max-width:100%}
+  .btn{min-height:44px}
+  td,th{padding:8px 10px}
+}
+
+/* ── Responsive – Mobile (≤ 480 px) ── */
+@media(max-width:480px){
+  html{font-size:14px}
+  .main{padding:16px 12px}
+  .page-title{font-size:1.3rem}
+  .summary-grid{grid-template-columns:1fr}
+  .preview-box{grid-template-columns:1fr}
+  .heatmap{grid-template-columns:repeat(2,1fr)}
+  .card{padding:16px}
+  .modal{padding:20px}
+  .period-tabs{width:100%}
+  .period-tab{flex:1;text-align:center}
+  .filter-toggle{width:100%}
+  .filter-btn{flex:1;text-align:center}
+  .chart-header{flex-direction:column;align-items:flex-start}
+  .topbar-user{display:none}
+  .page-header[style*="display:flex"]{flex-direction:column;align-items:flex-start}
+  canvas{max-height:200px}
+  .shortcut-box{padding:20px}
 }
 </style>
 </head>
 <body>
+<a class="skip-link" href="#main-content">Skip to main content</a>
 
 <!-- ── AUTH SCREEN ── -->
 <div class="auth-screen" id="auth-screen" style="display:none">
@@ -240,40 +278,40 @@ canvas{max-height:280px}
 
 <!-- ── MAIN SHELL ── -->
 <div class="shell" id="app-shell">
-  <header class="topbar">
-    <button class="hamburger" id="hamburger-btn" onclick="toggleSidebar()">☰</button>
-    <div class="logo"><div class="logo-icon">$</div> SHIFTLEDGER</div>
+  <header class="topbar" role="banner">
+    <button class="hamburger" id="hamburger-btn" onclick="toggleSidebar()" aria-label="Toggle navigation menu" aria-expanded="false" aria-controls="sidebar">☰</button>
+    <div class="logo"><div class="logo-icon" aria-hidden="true">$</div> SHIFTLEDGER</div>
     <div class="topbar-right">
-      <span class="topbar-date" id="topbar-date"></span>
-      <div class="topbar-user" id="topbar-user"></div>
-      <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">◐</button>
+      <span class="topbar-date" id="topbar-date" aria-live="polite"></span>
+      <div class="topbar-user" id="topbar-user" aria-live="polite"></div>
+      <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle light/dark theme">◐</button>
       <button class="btn btn-ghost btn-sm" onclick="doLogout()">Log out</button>
     </div>
   </header>
 
   <div class="sidebar-overlay" id="sidebar-overlay" onclick="toggleSidebar()"></div>
-  <nav class="sidebar" id="sidebar">
+  <nav class="sidebar" id="sidebar" role="navigation" aria-label="Main navigation">
     <div class="nav-section">Main</div>
-    <div class="nav-item active" data-view="log" onclick="navigate(this)">
-      <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 5v14M5 12l7-7 7 7"/></svg>Log Shift
+    <div class="nav-item active" data-view="log" onclick="navigate(this)" role="button" tabindex="0" aria-current="page">
+      <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12l7-7 7 7"/></svg>Log Shift
     </div>
-    <div class="nav-item" data-view="dashboard" onclick="navigate(this)">
-      <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Dashboard
+    <div class="nav-item" data-view="dashboard" onclick="navigate(this)" role="button" tabindex="0">
+      <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Dashboard
     </div>
     <div class="nav-section">Data</div>
-    <div class="nav-item" data-view="history" onclick="navigate(this)">
-      <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg>Shift History
+    <div class="nav-item" data-view="history" onclick="navigate(this)" role="button" tabindex="0">
+      <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/></svg>Shift History
     </div>
-    <div class="nav-item" data-view="reports" onclick="navigate(this)">
-      <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/></svg>Reports
+    <div class="nav-item" data-view="reports" onclick="navigate(this)" role="button" tabindex="0">
+      <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/></svg>Reports
     </div>
     <div class="nav-section">Account</div>
-    <div class="nav-item" data-view="settings" onclick="navigate(this)">
-      <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>Settings
+    <div class="nav-item" data-view="settings" onclick="navigate(this)" role="button" tabindex="0">
+      <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>Settings
     </div>
   </nav>
 
-  <main class="main">
+  <main class="main" id="main-content" tabindex="-1">
 
     <!-- ── LOG SHIFT ── -->
     <div class="view active" id="view-log">
@@ -544,9 +582,9 @@ canvas{max-height:280px}
 </div>
 
 <!-- Edit Modal -->
-<div class="modal-overlay" id="edit-modal">
+<div class="modal-overlay" id="edit-modal" role="dialog" aria-modal="true" aria-labelledby="edit-modal-title">
   <div class="modal">
-    <div class="modal-header"><span class="modal-title">Edit Shift</span><button class="close-btn" onclick="closeEditModal()">×</button></div>
+    <div class="modal-header"><span class="modal-title" id="edit-modal-title">Edit Shift</span><button class="close-btn" onclick="closeEditModal()" aria-label="Close edit shift dialog"><span aria-hidden="true">×</span></button></div>
     <div class="form-grid">
       <input type="hidden" id="e-id">
       <div class="form-group"><label>Date</label><input type="date" id="e-date"></div>
@@ -563,9 +601,9 @@ canvas{max-height:280px}
 </div>
 
 <!-- Job Edit Modal -->
-<div class="modal-overlay" id="job-edit-modal">
+<div class="modal-overlay" id="job-edit-modal" role="dialog" aria-modal="true" aria-labelledby="job-modal-title">
   <div class="modal">
-    <div class="modal-header"><span class="modal-title">Edit Job</span><button class="close-btn" onclick="closeJobModal()">&times;</button></div>
+    <div class="modal-header"><span class="modal-title" id="job-modal-title">Edit Job</span><button class="close-btn" onclick="closeJobModal()" aria-label="Close edit job dialog"><span aria-hidden="true">&times;</span></button></div>
     <div class="form-grid">
       <input type="hidden" id="ej-id">
       <div class="form-group"><label>Job Name</label><input id="ej-name"></div>
@@ -581,9 +619,9 @@ canvas{max-height:280px}
 </div>
 
 <!-- Shortcut Help -->
-<div class="shortcut-overlay" id="shortcut-overlay" onclick="this.classList.remove('open')">
+<div class="shortcut-overlay" id="shortcut-overlay" onclick="this.classList.remove('open')" role="dialog" aria-modal="true" aria-labelledby="shortcut-title">
   <div class="shortcut-box" onclick="event.stopPropagation()">
-    <h3>Keyboard Shortcuts</h3>
+    <h3 id="shortcut-title">Keyboard Shortcuts</h3>
     <div class="shortcut-row"><span>Log Shift</span><span class="shortcut-key">1</span></div>
     <div class="shortcut-row"><span>Dashboard</span><span class="shortcut-key">2</span></div>
     <div class="shortcut-row"><span>History</span><span class="shortcut-key">3</span></div>
@@ -615,6 +653,10 @@ document.addEventListener('DOMContentLoaded',()=>{
   const saved=localStorage.getItem('sl_theme');
   if(saved) document.documentElement.dataset.theme=saved;
   setupDecimalInputs();
+  // Keyboard activation for nav items (role="button")
+  document.querySelectorAll('.nav-item[role="button"]').forEach(el=>{
+    el.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();navigate(el)}});
+  });
   checkAuth();
 });
 
@@ -690,9 +732,10 @@ function setupDecimalInputs(){['f-rate','f-hours','f-tips','e-rate','e-hours','e
 // ── Navigation ──
 const viewKeys=['log','dashboard','history','reports','settings'];
 function navigate(el){
-  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n=>{n.classList.remove('active');n.removeAttribute('aria-current')});
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   el.classList.add('active');
+  el.setAttribute('aria-current','page');
   const view=el.dataset.view;
   $('view-'+view).classList.add('active');
   if(view==='dashboard')loadDashboard();
@@ -701,11 +744,13 @@ function navigate(el){
   // Close mobile sidebar
   $('sidebar').classList.remove('open');
   $('sidebar-overlay').classList.remove('open');
+  $('hamburger-btn').setAttribute('aria-expanded','false');
 }
 
 function toggleSidebar(){
-  $('sidebar').classList.toggle('open');
+  const isOpen=$('sidebar').classList.toggle('open');
   $('sidebar-overlay').classList.toggle('open');
+  $('hamburger-btn').setAttribute('aria-expanded',isOpen?'true':'false');
 }
 
 // ── Theme ──
