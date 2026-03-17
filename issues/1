@@ -1,0 +1,32 @@
+### Overview  
+This issue outlines the development of the Phase 1 of the Mobile App MVP focusing on Authentication and Shift Management functionalities.  
+
+### Features Checklist  
+- [ ] User authentication (login, registration, logout)  
+- [ ] Shift creation and management  
+- [ ] User roles (admin, staff)  
+- [ ] Notifications for shift changes  
+- [ ] Integration with backend APIs  
+
+### Acceptance Criteria  
+1. Users must be able to register and login.  
+2. Users can create, view, update, and delete shifts.  
+3. Admin users can manage shifts for all staff.  
+4. System sends notifications for shift changes to affected users.  
+
+### Estimated Timeline  
+- Start Date: 2026-03-20  
+- End Date: 2026-05-20  
+
+### Dependencies  
+- Backend API development for authentication  
+- Database setup for user and shift management  
+
+### Labels  
+- phase-1  
+- mobile  
+- authentication  
+- shift-management  
+
+### Story Points Estimate  
+- 40  
