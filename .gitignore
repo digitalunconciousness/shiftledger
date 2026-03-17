@@ -4,3 +4,5 @@ shifts.db-wal
 shifts.db-shm
 backups/
 *.log
+mobile/node_modules/
+mobile/.expo/

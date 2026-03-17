@@ -259,8 +259,15 @@ function authMiddleware(req, res, next) {
     return next();
   }
 
-  const cookies = parseCookies(req.headers.cookie);
-  const token = verifyCookie(cookies.sl_session);
+  // Accept Bearer token (mobile) or signed session cookie (web)
+  let token = null;
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.substring(7);
+  } else {
+    const cookies = parseCookies(req.headers.cookie);
+    token = verifyCookie(cookies.sl_session);
+  }
   if (!token) return res.status(401).json({ error: 'Not authenticated' });
 
   const tokenH = hashToken(token);
@@ -416,7 +423,7 @@ app.post('/api/auth/setup', validate(RegisterSchema), async (req, res) => {
     const expires = new Date(Date.now() + SESSION_MAX_AGE).toISOString();
     db.prepare(`INSERT INTO sessions (user_id, token_hash, expires_at) VALUES (?,?,?)`).run(result.lastInsertRowid, hashToken(token), expires);
     res.setHeader('Set-Cookie', `sl_session=${signCookie(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_AGE / 1000}`);
-    res.json({ success: true, user: { id: result.lastInsertRowid, username, display_name, is_admin: true, color: assignedColor } });
+    res.json({ success: true, token, user: { id: result.lastInsertRowid, username, display_name, is_admin: true, color: assignedColor } });
   } catch (e) {
     logger.error(e);
     res.status(500).json({ error: e.message });
@@ -435,7 +442,7 @@ app.post('/api/auth/login', validate(LoginSchema), async (req, res) => {
     const expires = new Date(Date.now() + SESSION_MAX_AGE).toISOString();
     db.prepare(`INSERT INTO sessions (user_id, token_hash, expires_at) VALUES (?,?,?)`).run(user.id, hashToken(token), expires);
     res.setHeader('Set-Cookie', `sl_session=${signCookie(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_AGE / 1000}`);
-    res.json({ success: true, user: { id: user.id, username: user.username, display_name: user.display_name, is_admin: !!user.is_admin, color: user.color } });
+    res.json({ success: true, token, user: { id: user.id, username: user.username, display_name: user.display_name, is_admin: !!user.is_admin, color: user.color } });
   } catch (e) {
     logger.error(e);
     res.status(500).json({ error: e.message });
@@ -444,9 +451,16 @@ app.post('/api/auth/login', validate(LoginSchema), async (req, res) => {
 
 // POST /api/auth/logout
 app.post('/api/auth/logout', (req, res) => {
-  const cookies = parseCookies(req.headers.cookie);
-  const token = verifyCookie(cookies.sl_session);
-  if (token) db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hashToken(token));
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.substring(7);
+    db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hashToken(token));
+  } else {
+    const cookies = parseCookies(req.headers.cookie);
+    const token = verifyCookie(cookies.sl_session);
+    if (token) db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hashToken(token));
+  }
+  // Always clear the session cookie (harmless if it was never set)
   res.setHeader('Set-Cookie', 'sl_session=; Path=/; HttpOnly; Max-Age=0');
   res.json({ success: true });
 });
@@ -466,6 +480,56 @@ app.post('/api/auth/register', authMiddleware, adminOnly, validate(RegisterSchem
     logger.error(e);
     res.status(500).json({ error: e.message });
   }
+});
+
+// POST /api/auth/signup — self-registration (requires at least one admin to exist)
+app.post('/api/auth/signup', validate(RegisterSchema), async (req, res) => {
+  try {
+    if (getUserCount() === 0) return res.status(400).json({ error: 'No admin account exists; use /api/auth/setup first' });
+    const { username, password, display_name, color } = req.validated;
+    const existingCount = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
+    const assignedColor = color || USER_COLORS[existingCount % USER_COLORS.length];
+    const pw = await hashPassword(password);
+    const result = db.prepare(`INSERT INTO users (username, display_name, password_hash, is_admin, color) VALUES (?,?,?,0,?)`)
+      .run(username, display_name, pw, assignedColor);
+
+    const token = generateToken();
+    const expires = new Date(Date.now() + SESSION_MAX_AGE).toISOString();
+    db.prepare(`INSERT INTO sessions (user_id, token_hash, expires_at) VALUES (?,?,?)`).run(result.lastInsertRowid, hashToken(token), expires);
+    res.status(201).json({ success: true, token, user: { id: result.lastInsertRowid, username, display_name, is_admin: false, color: assignedColor } });
+  } catch (e) {
+    if (e.message.includes('UNIQUE')) return res.status(409).json({ error: 'Username already taken' });
+    logger.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/auth/refresh — extend session expiry and return new token
+app.post('/api/auth/refresh', (req, res) => {
+  let token = null;
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.substring(7);
+  } else {
+    const cookies = parseCookies(req.headers.cookie);
+    token = verifyCookie(cookies.sl_session);
+  }
+  if (!token) return res.status(401).json({ error: 'Not authenticated' });
+
+  const tokenH = hashToken(token);
+  const session = db.prepare(`
+    SELECT s.*, u.id as uid, u.username, u.display_name, u.is_admin, u.color
+    FROM sessions s JOIN users u ON s.user_id = u.id
+    WHERE s.token_hash = ? AND s.expires_at > datetime('now')
+  `).get(tokenH);
+  if (!session) return res.status(401).json({ error: 'Session expired' });
+
+  const newToken = generateToken();
+  const expires = new Date(Date.now() + SESSION_MAX_AGE).toISOString();
+  db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(tokenH);
+  db.prepare(`INSERT INTO sessions (user_id, token_hash, expires_at) VALUES (?,?,?)`).run(session.uid, hashToken(newToken), expires);
+  res.setHeader('Set-Cookie', `sl_session=${signCookie(newToken)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_AGE / 1000}`);
+  res.json({ success: true, token: newToken, user: { id: session.uid, username: session.username, display_name: session.display_name, is_admin: !!session.is_admin, color: session.color } });
 });
 
 // ── User Management Routes ───────────────────────────────────────────────────

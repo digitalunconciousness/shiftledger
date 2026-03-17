@@ -1,1 +1,27 @@
-{\n  "name": "shiftledger-mobile",\n  "version": "1.0.0",\n  "private": true,\n  "dependencies": {\n    "react": "17.0.1",\n    "react-native": "0.64.0",\n    "expo": "41.0.1"\n  },\n  "scripts": {\n    "start": "expo start",\n    "android": "expo run:android",\n    "ios": "expo run:ios"\n  }\n}
+{
+  "name": "shiftledger-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "main": "node_modules/expo/AppEntry.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios"
+  },
+  "dependencies": {
+    "expo": "~50.0.0",
+    "react": "18.2.0",
+    "react-native": "0.73.6",
+    "@react-navigation/native": "^6.1.17",
+    "@react-navigation/native-stack": "^6.9.26",
+    "react-native-screens": "~3.29.0",
+    "react-native-safe-area-context": "4.8.2",
+    "react-native-gesture-handler": "~2.14.0",
+    "zustand": "^4.5.2",
+    "axios": "^1.6.8",
+    "@react-native-async-storage/async-storage": "1.21.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.24.0"
+  }
+}
