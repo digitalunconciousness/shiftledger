@@ -251,6 +251,40 @@ function getUserCount() {
   return db.prepare('SELECT COUNT(*) as c FROM users').get().c;
 }
 
+// Simple in-memory rate limiter (no extra dependencies).
+// windowMs: sliding window in ms. maxRequests: max allowed per window per IP.
+function createRateLimiter(windowMs, maxRequests) {
+  const hits = new Map();
+  // Prune stale entries periodically to prevent unbounded memory growth
+  setInterval(() => {
+    const cutoff = Date.now() - windowMs;
+    for (const [key, timestamps] of hits) {
+      const fresh = timestamps.filter((t) => t > cutoff);
+      if (fresh.length === 0) hits.delete(key);
+      else hits.set(key, fresh);
+    }
+  }, windowMs).unref();
+
+  return (req, res, next) => {
+    const forwarded = req.headers['x-forwarded-for'];
+    const ip = (forwarded ? forwarded.split(',')[0].trim() : null)
+      || req.socket.remoteAddress
+      || 'unknown';
+    const now = Date.now();
+    const cutoff = now - windowMs;
+    const timestamps = (hits.get(ip) || []).filter((t) => t > cutoff);
+    if (timestamps.length >= maxRequests) {
+      return res.status(429).json({ error: 'Too many requests, please try again later' });
+    }
+    timestamps.push(now);
+    hits.set(ip, timestamps);
+    next();
+  };
+}
+
+// Rate limiters for sensitive auth endpoints
+const authRateLimit = createRateLimiter(15 * 60 * 1000, 20); // 20 requests per 15 min
+
 // Auth middleware
 function authMiddleware(req, res, next) {
   // If no users exist, skip auth (first-run setup)
@@ -410,7 +444,7 @@ app.get('/api/auth/status', (req, res) => {
 });
 
 // POST /api/auth/setup — create first admin user
-app.post('/api/auth/setup', validate(RegisterSchema), async (req, res) => {
+app.post('/api/auth/setup', authRateLimit, validate(RegisterSchema), async (req, res) => {
   try {
     if (getUserCount() > 0) return res.status(400).json({ error: 'Setup already completed' });
     const { username, password, display_name, color } = req.validated;
@@ -431,7 +465,7 @@ app.post('/api/auth/setup', validate(RegisterSchema), async (req, res) => {
 });
 
 // POST /api/auth/login
-app.post('/api/auth/login', validate(LoginSchema), async (req, res) => {
+app.post('/api/auth/login', authRateLimit, validate(LoginSchema), async (req, res) => {
   try {
     const { username, password } = req.validated;
     const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
@@ -450,7 +484,7 @@ app.post('/api/auth/login', validate(LoginSchema), async (req, res) => {
 });
 
 // POST /api/auth/logout
-app.post('/api/auth/logout', (req, res) => {
+app.post('/api/auth/logout', authRateLimit, (req, res) => {
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.substring(7);
@@ -483,7 +517,7 @@ app.post('/api/auth/register', authMiddleware, adminOnly, validate(RegisterSchem
 });
 
 // POST /api/auth/signup — self-registration (requires at least one admin to exist)
-app.post('/api/auth/signup', validate(RegisterSchema), async (req, res) => {
+app.post('/api/auth/signup', authRateLimit, validate(RegisterSchema), async (req, res) => {
   try {
     if (getUserCount() === 0) return res.status(400).json({ error: 'No admin account exists; use /api/auth/setup first' });
     const { username, password, display_name, color } = req.validated;
@@ -505,7 +539,7 @@ app.post('/api/auth/signup', validate(RegisterSchema), async (req, res) => {
 });
 
 // POST /api/auth/refresh — extend session expiry and return new token
-app.post('/api/auth/refresh', (req, res) => {
+app.post('/api/auth/refresh', authRateLimit, (req, res) => {
   let token = null;
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
