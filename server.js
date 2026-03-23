@@ -164,6 +164,24 @@ function migrate() {
         db.exec("ALTER TABLE jobs ADD COLUMN tip_payment TEXT NOT NULL DEFAULT 'cash'");
       }
     },
+    // v7: paychecks table for tracking real paycheck data
+    () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS paychecks (
+          id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id             INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          pay_date            TEXT    NOT NULL,
+          gross_pay           REAL    NOT NULL DEFAULT 0,
+          federal_withholding REAL    NOT NULL DEFAULT 0,
+          state_withholding   REAL    NOT NULL DEFAULT 0,
+          social_security     REAL    NOT NULL DEFAULT 0,
+          medicare            REAL    NOT NULL DEFAULT 0,
+          net_pay             REAL    NOT NULL DEFAULT 0,
+          notes               TEXT    DEFAULT '',
+          created_at          TEXT    DEFAULT (datetime('now'))
+        )
+      `);
+    },
   ];
 
   const tx = db.transaction(() => {
@@ -376,6 +394,17 @@ const GoalSchema = z.object({
   period: z.enum(['weekly', 'monthly']),
   target_amount: z.number().min(0),
   active: z.boolean().optional().default(true),
+});
+
+const PaycheckSchema = z.object({
+  pay_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'pay_date must be YYYY-MM-DD'),
+  gross_pay: z.number().positive(),
+  federal_withholding: z.number().nonnegative().default(0),
+  state_withholding: z.number().nonnegative().default(0),
+  social_security: z.number().nonnegative().default(0),
+  medicare: z.number().nonnegative().default(0),
+  net_pay: z.number().nonnegative(),
+  notes: z.string().max(500).optional().default(''),
 });
 
 const RegisterSchema = z.object({
@@ -1036,6 +1065,68 @@ app.post('/api/tax-config', authMiddleware, adminOnly, (req, res) => {
 app.delete('/api/tax-config/:id', authMiddleware, adminOnly, (req, res) => {
   db.prepare('DELETE FROM tax_config WHERE id = ?').run(req.params.id);
   res.json({ success: true });
+});
+
+// ── Paycheck History Routes ───────────────────────────────────────────────────
+
+app.get('/api/paychecks', authMiddleware, (req, res) => {
+  try {
+    const rows = db.prepare(
+      'SELECT * FROM paychecks WHERE user_id = ? ORDER BY pay_date DESC LIMIT 50'
+    ).all(req.user.id);
+    res.json(rows);
+  } catch (e) { logger.error(e); res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/paychecks', authMiddleware, validate(PaycheckSchema), (req, res) => {
+  try {
+    const d = req.validated;
+    const result = db.prepare(
+      `INSERT INTO paychecks (user_id, pay_date, gross_pay, federal_withholding, state_withholding, social_security, medicare, net_pay, notes)
+       VALUES (?,?,?,?,?,?,?,?,?)`
+    ).run(req.user.id, d.pay_date, d.gross_pay, d.federal_withholding, d.state_withholding, d.social_security, d.medicare, d.net_pay, d.notes || '');
+    res.status(201).json({ id: result.lastInsertRowid });
+  } catch (e) { logger.error(e); res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/paychecks/:id', authMiddleware, (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const row = db.prepare('SELECT * FROM paychecks WHERE id = ?').get(id);
+    if (!row) return res.status(404).json({ error: 'Paycheck not found' });
+    if (row.user_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Forbidden' });
+    db.prepare('DELETE FROM paychecks WHERE id = ?').run(id);
+    res.json({ success: true });
+  } catch (e) { logger.error(e); res.status(500).json({ error: e.message }); }
+});
+
+// Apply the effective tax rates from a paycheck entry to the tax_config table
+app.post('/api/paychecks/:id/apply-rates', authMiddleware, adminOnly, (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const row = db.prepare('SELECT * FROM paychecks WHERE id = ?').get(id);
+    if (!row) return res.status(404).json({ error: 'Paycheck not found' });
+    if (row.gross_pay <= 0) return res.status(400).json({ error: 'Gross pay must be > 0 to calculate rates' });
+
+    const rates = {
+      federal: Math.round(row.federal_withholding / row.gross_pay * 10000) / 10000,
+      state: Math.round(row.state_withholding / row.gross_pay * 10000) / 10000,
+      social_security: Math.round(row.social_security / row.gross_pay * 10000) / 10000,
+      medicare: Math.round(row.medicare / row.gross_pay * 10000) / 10000,
+    };
+
+    const update = db.prepare('UPDATE tax_config SET rate = ? WHERE key = ?');
+    const tx = db.transaction(() => {
+      const applied = {};
+      for (const [key, rate] of Object.entries(rates)) {
+        const info = update.run(rate, key);
+        applied[key] = info.changes > 0 ? rate : null;
+      }
+      return applied;
+    });
+    const applied = tx();
+    res.json({ success: true, applied });
+  } catch (e) { logger.error(e); res.status(500).json({ error: e.message }); }
 });
 
 // ── Paycheck Estimate ────────────────────────────────────────────────────────
