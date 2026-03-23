@@ -357,7 +357,7 @@ canvas{max-height:280px}
     <div class="view" id="view-dashboard">
       <div class="page-header" style="display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:12px">
         <div><h1 class="page-title">Dashboard</h1><p class="page-sub">Your earnings at a glance</p></div>
-        <div class="filter-toggle" id="dash-filter"><button class="filter-btn active" onclick="setDashFilter(this,'')" data-uid="">All Shifts</button><button class="filter-btn" onclick="setDashFilter(this,'mine')" data-uid="mine">My Shifts</button></div>
+        <div class="filter-toggle" id="dash-filter"><button class="filter-btn" onclick="setDashFilter(this,'')" data-uid="">All Shifts</button><button class="filter-btn active" onclick="setDashFilter(this,'mine')" data-uid="mine">My Shifts</button></div>
       </div>
       <div class="summary-grid" id="summary-grid"></div>
       <!-- Goals -->
@@ -393,7 +393,7 @@ canvas{max-height:280px}
       <div class="page-header" style="display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:12px">
         <div><h1 class="page-title">Shift History</h1><p class="page-sub">All recorded shifts</p></div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <div class="filter-toggle"><button class="filter-btn active" onclick="setHistFilter(this,'')" data-uid="">All</button><button class="filter-btn" onclick="setHistFilter(this,'mine')" data-uid="mine">Mine</button></div>
+          <div class="filter-toggle"><button class="filter-btn" onclick="setHistFilter(this,'')" data-uid="">All</button><button class="filter-btn active" onclick="setHistFilter(this,'mine')" data-uid="mine">Mine</button></div>
           <input type="date" id="hist-from" style="width:140px" onchange="loadHistory()">
           <span style="color:var(--text-mute);font-family:var(--mono);font-size:.8rem">to</span>
           <input type="date" id="hist-to" style="width:140px" onchange="loadHistory()">
@@ -832,17 +832,18 @@ function clearForm(){
 function setDashFilter(el,uid){
   document.querySelectorAll('#dash-filter .filter-btn').forEach(b=>b.classList.remove('active'));
   el.classList.add('active');
-  dashFilterUser=uid==='mine'?currentUser.id:'';
+  dashFilterUser=uid===''?'all':'';
   loadDashboard();
 }
 
 async function loadDashboard(){
-  const qs=dashFilterUser?`?user_id=${dashFilterUser}`:'';
+  const qs=dashFilterUser==='all'?'?user_id=all':'';
+  const qsa=dashFilterUser==='all'?'&user_id=all':'';
   const[sumRes,trendRes,dowRes,tipRes,otRes,taxRes,goalsRes,pchkRes,histRes]=await Promise.all([
-    fetch('/api/summary'+qs),fetch('/api/trends?period='+currentPeriod),
-    fetch('/api/analytics/effective-rate'),fetch('/api/analytics/tip-ratio'),
-    fetch('/api/overtime'),fetch('/api/tax-estimate?period=ytd'),fetch('/api/goals'),
-    fetch('/api/paycheck-estimate'),fetch('/api/goals/history'+qs)
+    fetch('/api/summary'+qs),fetch('/api/trends?period='+currentPeriod+qsa),
+    fetch('/api/analytics/effective-rate'+qs),fetch('/api/analytics/tip-ratio'+qs),
+    fetch('/api/overtime'+qs),fetch('/api/tax-estimate?period=ytd'+qsa),fetch('/api/goals'),
+    fetch('/api/paycheck-estimate'+qs),fetch('/api/goals/history'+qs)
   ]);
   const[summary,trends,dow,tipRatio,overtime,tax,goals,paycheck,goalHistory]=await Promise.all([sumRes.json(),trendRes.json(),dowRes.json(),tipRes.json(),otRes.json(),taxRes.json(),goalsRes.json(),pchkRes.json(),histRes.json()]);
   renderSummaryCards(summary);renderHeatmap(dow);renderTrendChart(trends);renderBreakdownChart(trends);renderTipRatioChart(tipRatio);renderEffRateChart(trends);renderExtraCards(overtime,tax);renderGoals(goals,summary,goalHistory);renderPaycheckCard(paycheck);
@@ -1009,7 +1010,7 @@ function renderEffRateChart(data){
 function setHistFilter(el,uid){
   el.parentElement.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
   el.classList.add('active');
-  histFilterUser=uid==='mine'?currentUser.id:'';
+  histFilterUser=uid===''?'all':'';
   loadHistory();
 }
 
@@ -1017,7 +1018,7 @@ async function loadHistory(){
   const from=gv('hist-from'),to=gv('hist-to');
   let url='/api/shifts?';
   if(from&&to)url+=`from=${from}&to=${to}&`;else if(from)url+=`from=${from}&`;
-  if(histFilterUser)url+=`user_id=${histFilterUser}&`;
+  if(histFilterUser==='all')url+=`user_id=all&`;
   const shifts=await fetch(url).then(r=>r.json());
   const tbody=$('history-body');
   if(!shifts.length){tbody.innerHTML='<tr><td colspan="11" class="empty">No shifts found.</td></tr>';$('history-totals').style.display='none';return}

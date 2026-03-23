@@ -1,3 +1,4 @@
+
 const express = require('express');
 const Database = require('better-sqlite3');
 const PDFDocument = require('pdfkit');
@@ -177,6 +178,19 @@ function migrate() {
 
 migrate();
 
+// ── User Filter Helper ────────────────────────────────────────────────────────
+// Returns the user_id to filter by, or null to return all users' data.
+// Non-admins always get their own data. Admins can pass user_id=all (all users)
+// or user_id=<id> (specific user). Omitting user_id defaults to current user.
+function resolveUserFilter(req) {
+  const param = req.query.user_id;
+  if (req.user && req.user.is_admin) {
+    if (param === 'all') return null;
+    if (param) return parseInt(param, 10) || req.user.id;
+  }
+  return req.user ? req.user.id : null;
+}
+
 // ── Middleware ────────────────────────────────────────────────────────────────
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -251,6 +265,40 @@ function getUserCount() {
   return db.prepare('SELECT COUNT(*) as c FROM users').get().c;
 }
 
+// Simple in-memory rate limiter (no extra dependencies).
+// windowMs: sliding window in ms. maxRequests: max allowed per window per IP.
+function createRateLimiter(windowMs, maxRequests) {
+  const hits = new Map();
+  // Prune stale entries periodically to prevent unbounded memory growth
+  setInterval(() => {
+    const cutoff = Date.now() - windowMs;
+    for (const [key, timestamps] of hits) {
+      const fresh = timestamps.filter((t) => t > cutoff);
+      if (fresh.length === 0) hits.delete(key);
+      else hits.set(key, fresh);
+    }
+  }, windowMs).unref();
+
+  return (req, res, next) => {
+    const forwarded = req.headers['x-forwarded-for'];
+    const ip = (forwarded ? forwarded.split(',')[0].trim() : null)
+      || req.socket.remoteAddress
+      || 'unknown';
+    const now = Date.now();
+    const cutoff = now - windowMs;
+    const timestamps = (hits.get(ip) || []).filter((t) => t > cutoff);
+    if (timestamps.length >= maxRequests) {
+      return res.status(429).json({ error: 'Too many requests, please try again later' });
+    }
+    timestamps.push(now);
+    hits.set(ip, timestamps);
+    next();
+  };
+}
+
+// Rate limiters for sensitive auth endpoints
+const authRateLimit = createRateLimiter(15 * 60 * 1000, 20); // 20 requests per 15 min
+
 // Auth middleware
 function authMiddleware(req, res, next) {
   // If no users exist, skip auth (first-run setup)
@@ -259,8 +307,15 @@ function authMiddleware(req, res, next) {
     return next();
   }
 
-  const cookies = parseCookies(req.headers.cookie);
-  const token = verifyCookie(cookies.sl_session);
+  // Accept Bearer token (mobile) or signed session cookie (web)
+  let token = null;
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.substring(7);
+  } else {
+    const cookies = parseCookies(req.headers.cookie);
+    token = verifyCookie(cookies.sl_session);
+  }
   if (!token) return res.status(401).json({ error: 'Not authenticated' });
 
   const tokenH = hashToken(token);
@@ -403,7 +458,7 @@ app.get('/api/auth/status', (req, res) => {
 });
 
 // POST /api/auth/setup — create first admin user
-app.post('/api/auth/setup', validate(RegisterSchema), async (req, res) => {
+app.post('/api/auth/setup', authRateLimit, validate(RegisterSchema), async (req, res) => {
   try {
     if (getUserCount() > 0) return res.status(400).json({ error: 'Setup already completed' });
     const { username, password, display_name, color } = req.validated;
@@ -416,7 +471,7 @@ app.post('/api/auth/setup', validate(RegisterSchema), async (req, res) => {
     const expires = new Date(Date.now() + SESSION_MAX_AGE).toISOString();
     db.prepare(`INSERT INTO sessions (user_id, token_hash, expires_at) VALUES (?,?,?)`).run(result.lastInsertRowid, hashToken(token), expires);
     res.setHeader('Set-Cookie', `sl_session=${signCookie(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_AGE / 1000}`);
-    res.json({ success: true, user: { id: result.lastInsertRowid, username, display_name, is_admin: true, color: assignedColor } });
+    res.json({ success: true, token, user: { id: result.lastInsertRowid, username, display_name, is_admin: true, color: assignedColor } });
   } catch (e) {
     logger.error(e);
     res.status(500).json({ error: e.message });
@@ -424,7 +479,7 @@ app.post('/api/auth/setup', validate(RegisterSchema), async (req, res) => {
 });
 
 // POST /api/auth/login
-app.post('/api/auth/login', validate(LoginSchema), async (req, res) => {
+app.post('/api/auth/login', authRateLimit, validate(LoginSchema), async (req, res) => {
   try {
     const { username, password } = req.validated;
     const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
@@ -435,7 +490,7 @@ app.post('/api/auth/login', validate(LoginSchema), async (req, res) => {
     const expires = new Date(Date.now() + SESSION_MAX_AGE).toISOString();
     db.prepare(`INSERT INTO sessions (user_id, token_hash, expires_at) VALUES (?,?,?)`).run(user.id, hashToken(token), expires);
     res.setHeader('Set-Cookie', `sl_session=${signCookie(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_AGE / 1000}`);
-    res.json({ success: true, user: { id: user.id, username: user.username, display_name: user.display_name, is_admin: !!user.is_admin, color: user.color } });
+    res.json({ success: true, token, user: { id: user.id, username: user.username, display_name: user.display_name, is_admin: !!user.is_admin, color: user.color } });
   } catch (e) {
     logger.error(e);
     res.status(500).json({ error: e.message });
@@ -443,10 +498,17 @@ app.post('/api/auth/login', validate(LoginSchema), async (req, res) => {
 });
 
 // POST /api/auth/logout
-app.post('/api/auth/logout', (req, res) => {
-  const cookies = parseCookies(req.headers.cookie);
-  const token = verifyCookie(cookies.sl_session);
-  if (token) db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hashToken(token));
+app.post('/api/auth/logout', authRateLimit, (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.substring(7);
+    db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hashToken(token));
+  } else {
+    const cookies = parseCookies(req.headers.cookie);
+    const token = verifyCookie(cookies.sl_session);
+    if (token) db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hashToken(token));
+  }
+  // Always clear the session cookie (harmless if it was never set)
   res.setHeader('Set-Cookie', 'sl_session=; Path=/; HttpOnly; Max-Age=0');
   res.json({ success: true });
 });
@@ -466,6 +528,56 @@ app.post('/api/auth/register', authMiddleware, adminOnly, validate(RegisterSchem
     logger.error(e);
     res.status(500).json({ error: e.message });
   }
+});
+
+// POST /api/auth/signup — self-registration (requires at least one admin to exist)
+app.post('/api/auth/signup', authRateLimit, validate(RegisterSchema), async (req, res) => {
+  try {
+    if (getUserCount() === 0) return res.status(400).json({ error: 'No admin account exists; use /api/auth/setup first' });
+    const { username, password, display_name, color } = req.validated;
+    const existingCount = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
+    const assignedColor = color || USER_COLORS[existingCount % USER_COLORS.length];
+    const pw = await hashPassword(password);
+    const result = db.prepare(`INSERT INTO users (username, display_name, password_hash, is_admin, color) VALUES (?,?,?,0,?)`)
+      .run(username, display_name, pw, assignedColor);
+
+    const token = generateToken();
+    const expires = new Date(Date.now() + SESSION_MAX_AGE).toISOString();
+    db.prepare(`INSERT INTO sessions (user_id, token_hash, expires_at) VALUES (?,?,?)`).run(result.lastInsertRowid, hashToken(token), expires);
+    res.status(201).json({ success: true, token, user: { id: result.lastInsertRowid, username, display_name, is_admin: false, color: assignedColor } });
+  } catch (e) {
+    if (e.message.includes('UNIQUE')) return res.status(409).json({ error: 'Username already taken' });
+    logger.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/auth/refresh — extend session expiry and return new token
+app.post('/api/auth/refresh', authRateLimit, (req, res) => {
+  let token = null;
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.substring(7);
+  } else {
+    const cookies = parseCookies(req.headers.cookie);
+    token = verifyCookie(cookies.sl_session);
+  }
+  if (!token) return res.status(401).json({ error: 'Not authenticated' });
+
+  const tokenH = hashToken(token);
+  const session = db.prepare(`
+    SELECT s.*, u.id as uid, u.username, u.display_name, u.is_admin, u.color
+    FROM sessions s JOIN users u ON s.user_id = u.id
+    WHERE s.token_hash = ? AND s.expires_at > datetime('now')
+  `).get(tokenH);
+  if (!session) return res.status(401).json({ error: 'Session expired' });
+
+  const newToken = generateToken();
+  const expires = new Date(Date.now() + SESSION_MAX_AGE).toISOString();
+  db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(tokenH);
+  db.prepare(`INSERT INTO sessions (user_id, token_hash, expires_at) VALUES (?,?,?)`).run(session.uid, hashToken(newToken), expires);
+  res.setHeader('Set-Cookie', `sl_session=${signCookie(newToken)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_AGE / 1000}`);
+  res.json({ success: true, token: newToken, user: { id: session.uid, username: session.username, display_name: session.display_name, is_admin: !!session.is_admin, color: session.color } });
 });
 
 // ── User Management Routes ───────────────────────────────────────────────────
@@ -530,13 +642,14 @@ app.post('/api/shifts', authMiddleware, validate(ShiftSchema), (req, res) => {
 });
 
 app.get('/api/shifts', authMiddleware, (req, res) => {
-  const { from, to, user_id: filterUser } = req.query;
+  const { from, to } = req.query;
+  const filterUser = resolveUserFilter(req);
   let query = 'SELECT s.*, u.display_name as user_name, u.color as user_color, j.name as job_name, j.color as job_color FROM shifts s LEFT JOIN users u ON s.user_id = u.id LEFT JOIN jobs j ON s.job_id = j.id WHERE s.deleted_at IS NULL';
   const params = [];
 
   if (from && to) { query += ' AND s.date >= ? AND s.date <= ?'; params.push(from, to); }
   else if (from) { query += ' AND s.date >= ?'; params.push(from); }
-  if (filterUser) { query += ' AND s.user_id = ?'; params.push(filterUser); }
+  if (filterUser !== null) { query += ' AND s.user_id = ?'; params.push(filterUser); }
   query += ' ORDER BY s.date DESC, s.id DESC';
 
   res.json(db.prepare(query).all(...params));
@@ -999,22 +1112,27 @@ app.get('/api/paycheck-estimate', authMiddleware, (req, res) => {
     const from = fmt(pp.periodStart), to = fmt(pp.periodEnd);
     const prevFrom = fmt(pp.prevStart), prevTo = fmt(pp.prevEnd);
 
+    const filterUser = resolveUserFilter(req);
+    const userWhere = filterUser !== null ? ' AND user_id = ?' : '';
+    const userParam = filterUser !== null ? [filterUser] : [];
+
     // Sum all shifts in the period
     const sumQuery = `SELECT COALESCE(SUM(wage_total),0) as wages, COALESCE(SUM(total_tips),0) as tips,
       COALESCE(SUM(grand_total),0) as gross, COALESCE(SUM(hours_worked),0) as hours, COUNT(*) as shifts
-      FROM shifts WHERE date >= ? AND date <= ? AND deleted_at IS NULL`;
+      FROM shifts WHERE date >= ? AND date <= ? AND deleted_at IS NULL${userWhere}`;
 
-    const current = db.prepare(sumQuery).get(from, to);
-    const previous = db.prepare(sumQuery).get(prevFrom, prevTo);
+    const current = db.prepare(sumQuery).get(from, to, ...userParam);
+    const previous = db.prepare(sumQuery).get(prevFrom, prevTo, ...userParam);
 
     // Split tips by payment method (cash vs paycheck) based on each shift's job setting
+    const tipSplitWhere = filterUser !== null ? ' AND s.user_id = ?' : '';
     const tipSplitQuery = `SELECT
       COALESCE(SUM(CASE WHEN COALESCE(j.tip_payment,'cash')='cash' THEN s.total_tips ELSE 0 END),0) as cash_tips,
       COALESCE(SUM(CASE WHEN COALESCE(j.tip_payment,'cash')='paycheck' THEN s.total_tips ELSE 0 END),0) as paycheck_tips
       FROM shifts s LEFT JOIN jobs j ON s.job_id = j.id
-      WHERE s.date >= ? AND s.date <= ? AND s.deleted_at IS NULL`;
+      WHERE s.date >= ? AND s.date <= ? AND s.deleted_at IS NULL${tipSplitWhere}`;
 
-    const tipSplit = db.prepare(tipSplitQuery).get(from, to);
+    const tipSplit = db.prepare(tipSplitQuery).get(from, to, ...userParam);
 
     // Paycheck gross = wages + paycheck tips (cash tips already received nightly)
     const paycheckGross = current.wages + tipSplit.paycheck_tips;
@@ -1155,8 +1273,8 @@ app.get('/api/goals/history', authMiddleware, (req, res) => {
     const activeGoals = db.prepare('SELECT * FROM goals WHERE active = 1').all();
     if (!activeGoals.length) return res.json([]);
 
-    const filterUser = parseInt(req.query.user_id, 10);
-    const hasUserFilter = Number.isInteger(filterUser) && filterUser > 0;
+    const filterUser = resolveUserFilter(req);
+    const hasUserFilter = filterUser !== null;
     const shiftWhere = hasUserFilter ? 'deleted_at IS NULL AND user_id = ?' : 'deleted_at IS NULL';
     const filterParams = hasUserFilter ? [filterUser] : [];
 
@@ -1233,7 +1351,7 @@ app.get('/api/goals/history', authMiddleware, (req, res) => {
 
 app.get('/api/summary', authMiddleware, (req, res) => {
   const { now, weekStart, lastWeekStart, lastWeekEnd, biweekStart, monthStart, lastMonthStart, lastMonthEnd, ytdStart } = getPeriodBounds();
-  const filterUser = req.query.user_id;
+  const filterUser = resolveUserFilter(req);
 
   const sum = (from, to) => {
     let q = `SELECT COUNT(*) as shifts, COALESCE(SUM(hours_worked),0) as total_hours,
@@ -1242,7 +1360,7 @@ app.get('/api/summary', authMiddleware, (req, res) => {
       COALESCE(SUM(total_tips)/NULLIF(SUM(hours_worked),0),0) as avg_tips_per_hour
       FROM shifts WHERE date >= ? AND date <= ? AND deleted_at IS NULL`;
     const params = [from, to];
-    if (filterUser) { q += ' AND user_id = ?'; params.push(filterUser); }
+    if (filterUser !== null) { q += ' AND user_id = ?'; params.push(filterUser); }
     return db.prepare(q).get(...params);
   };
 
@@ -1278,14 +1396,19 @@ app.get('/api/trends', authMiddleware, (req, res) => {
     groupFmt = "strftime('%Y-%m', date)";
   }
 
+  const filterUser = resolveUserFilter(req);
+  let trendWhere = 'date >= ? AND deleted_at IS NULL';
+  const trendParams = [dateFilter];
+  if (filterUser !== null) { trendWhere += ' AND user_id = ?'; trendParams.push(filterUser); }
+
   const data = db.prepare(`
     SELECT ${groupFmt} as period, COUNT(*) as shifts, SUM(hours_worked) as total_hours,
       SUM(wage_total) as total_wages, SUM(total_tips) as total_tips, SUM(grand_total) as grand_total,
       SUM(total_tips)/NULLIF(SUM(hours_worked),0) as tips_per_hour,
       SUM(grand_total)/NULLIF(SUM(hours_worked),0) as effective_rate
-    FROM shifts WHERE date >= ? AND deleted_at IS NULL
+    FROM shifts WHERE ${trendWhere}
     GROUP BY period ORDER BY period ASC
-  `).all(dateFilter);
+  `).all(...trendParams);
 
   res.json(data);
 });
@@ -1293,31 +1416,44 @@ app.get('/api/trends', authMiddleware, (req, res) => {
 // ── Analytics ────────────────────────────────────────────────────────────────
 
 app.get('/api/analytics/effective-rate', authMiddleware, (req, res) => {
+  const filterUser = resolveUserFilter(req);
+  let where = 'deleted_at IS NULL AND hours_worked > 0';
+  const params = [];
+  if (filterUser !== null) { where += ' AND user_id = ?'; params.push(filterUser); }
   const data = db.prepare(`
     SELECT CAST(strftime('%w', date) AS INTEGER) as dow,
       AVG((wage_total + total_tips) / NULLIF(hours_worked, 0)) as avg_effective_rate,
       COUNT(*) as shift_count
-    FROM shifts WHERE deleted_at IS NULL AND hours_worked > 0
+    FROM shifts WHERE ${where}
     GROUP BY dow ORDER BY dow
-  `).all();
+  `).all(...params);
   res.json(data);
 });
 
 app.get('/api/analytics/extremes', authMiddleware, (req, res) => {
   const count = parseInt(req.query.count, 10) || 5;
-  const best = db.prepare(`SELECT s.*, u.display_name as user_name, j.name as job_name FROM shifts s LEFT JOIN users u ON s.user_id=u.id LEFT JOIN jobs j ON s.job_id=j.id WHERE s.deleted_at IS NULL ORDER BY s.grand_total DESC LIMIT ?`).all(count);
-  const worst = db.prepare(`SELECT s.*, u.display_name as user_name, j.name as job_name FROM shifts s LEFT JOIN users u ON s.user_id=u.id LEFT JOIN jobs j ON s.job_id=j.id WHERE s.deleted_at IS NULL ORDER BY s.grand_total ASC LIMIT ?`).all(count);
+  const filterUser = resolveUserFilter(req);
+  let where = 's.deleted_at IS NULL';
+  const userParams = [];
+  if (filterUser !== null) { where += ' AND s.user_id = ?'; userParams.push(filterUser); }
+  const baseQuery = `SELECT s.*, u.display_name as user_name, j.name as job_name FROM shifts s LEFT JOIN users u ON s.user_id=u.id LEFT JOIN jobs j ON s.job_id=j.id WHERE ${where}`;
+  const best = db.prepare(baseQuery + ' ORDER BY s.grand_total DESC LIMIT ?').all(...userParams, count);
+  const worst = db.prepare(baseQuery + ' ORDER BY s.grand_total ASC LIMIT ?').all(...userParams, count);
   res.json({ best, worst });
 });
 
 app.get('/api/analytics/tip-ratio', authMiddleware, (req, res) => {
+  const filterUser = resolveUserFilter(req);
+  let where = 'deleted_at IS NULL';
+  const params = [];
+  if (filterUser !== null) { where += ' AND user_id = ?'; params.push(filterUser); }
   const data = db.prepare(`
     SELECT strftime('%Y-%m', date) as period,
       SUM(total_tips) as total_tips, SUM(grand_total) as grand_total,
       CASE WHEN SUM(grand_total) > 0 THEN ROUND(SUM(total_tips) * 100.0 / SUM(grand_total), 1) ELSE 0 END as tip_pct
-    FROM shifts WHERE deleted_at IS NULL
+    FROM shifts WHERE ${where}
     GROUP BY period ORDER BY period ASC
-  `).all();
+  `).all(...params);
   res.json(data);
 });
 
@@ -1327,13 +1463,18 @@ app.get('/api/overtime', authMiddleware, (req, res) => {
   const { now, weekStart } = getPeriodBounds();
   const defaultThreshold = parseFloat(process.env.OT_THRESHOLD) || 40;
   const defaultMultiplier = parseFloat(process.env.OT_MULTIPLIER) || 1.5;
+  const filterUser = resolveUserFilter(req);
+
+  let otWhere = 's.date >= ? AND s.date <= ? AND s.deleted_at IS NULL';
+  const otParams = [fmt(weekStart), fmt(now)];
+  if (filterUser !== null) { otWhere += ' AND s.user_id = ?'; otParams.push(filterUser); }
 
   const weekShifts = db.prepare(`
     SELECT s.*, j.name as job_name, j.overtime_threshold, j.overtime_multiplier
     FROM shifts s LEFT JOIN jobs j ON s.job_id = j.id
-    WHERE s.date >= ? AND s.date <= ? AND s.deleted_at IS NULL
+    WHERE ${otWhere}
     ORDER BY s.date ASC
-  `).all(fmt(weekStart), fmt(now));
+  `).all(...otParams);
 
   let totalHours = 0;
   weekShifts.forEach(s => { totalHours += s.hours_worked; });
@@ -1365,10 +1506,15 @@ app.get('/api/tax-estimate', authMiddleware, (req, res) => {
   if (period === 'month') { from = fmt(bounds.monthStart); to = fmt(bounds.now); }
   else { from = fmt(bounds.ytdStart); to = fmt(bounds.now); }
 
+  const filterUser = resolveUserFilter(req);
+  let taxWhere = 'date >= ? AND date <= ? AND deleted_at IS NULL';
+  const taxParams = [from, to];
+  if (filterUser !== null) { taxWhere += ' AND user_id = ?'; taxParams.push(filterUser); }
+
   const data = db.prepare(`
     SELECT COALESCE(SUM(wage_total),0) as wages, COALESCE(SUM(total_tips),0) as tips, COALESCE(SUM(grand_total),0) as total
-    FROM shifts WHERE date >= ? AND date <= ? AND deleted_at IS NULL
-  `).get(from, to);
+    FROM shifts WHERE ${taxWhere}
+  `).get(...taxParams);
 
   res.json({
     period: period || 'ytd',
@@ -1387,9 +1533,11 @@ app.get('/api/tax-estimate', authMiddleware, (req, res) => {
 
 app.get('/api/export/csv', authMiddleware, (req, res) => {
   const { from, to } = req.query;
+  const filterUser = resolveUserFilter(req);
   let query = 'SELECT s.*, j.name as job_name, u.display_name as user_name FROM shifts s LEFT JOIN jobs j ON s.job_id=j.id LEFT JOIN users u ON s.user_id=u.id WHERE s.deleted_at IS NULL';
   const params = [];
   if (from && to) { query += ' AND s.date >= ? AND s.date <= ?'; params.push(from, to); }
+  if (filterUser !== null) { query += ' AND s.user_id = ?'; params.push(filterUser); }
   query += ' ORDER BY s.date ASC';
 
   const shifts = db.prepare(query).all(...params);
@@ -1458,9 +1606,11 @@ app.post('/api/import/csv', authMiddleware, express.text({ type: '*/*', limit: '
 
 app.get('/api/export/pdf', authMiddleware, (req, res) => {
   const { from, to, label } = req.query;
+  const filterUser = resolveUserFilter(req);
   let query = 'SELECT s.*, j.name as job_name, u.display_name as user_name FROM shifts s LEFT JOIN jobs j ON s.job_id=j.id LEFT JOIN users u ON s.user_id=u.id WHERE s.deleted_at IS NULL';
   const params = [];
   if (from && to) { query += ' AND s.date >= ? AND s.date <= ?'; params.push(from, to); }
+  if (filterUser !== null) { query += ' AND s.user_id = ?'; params.push(filterUser); }
   query += ' ORDER BY s.date ASC';
 
   const shifts = db.prepare(query).all(...params);
