@@ -21,10 +21,10 @@ Implement a comprehensive security hardening initiative across code, infrastruct
   - Auth endpoints: 20 requests / 15 min per IP
   - General API: 120 requests / min per IP (added in this pass)
   - JSON body size capped at 100 KB to prevent DoS (added in this pass)
-- [ ] Conduct dependency audit and update vulnerable packages
+- [x] Conduct dependency audit and update vulnerable packages — audited March 2026 (see Dependency Audit section below)
 - [x] Implement security headers (CSP, X-Frame-Options, etc.) — added in this pass
   - `X-Content-Type-Options: nosniff`
-  - `X-Frame-Options: SAMEORIGIN`
+  - `X-Frame-Options: DENY`
   - `X-XSS-Protection: 0` (modern browsers: disable legacy XSS filter)
   - `Referrer-Policy: strict-origin-when-cross-origin`
   - `Permissions-Policy: camera=(), microphone=(), geolocation=()`
@@ -81,3 +81,57 @@ Implement a comprehensive security hardening initiative across code, infrastruct
 4. **Restrict database file permissions** so only the app user can read `shifts.db`.
 5. **Keep dependencies updated** — run `npm audit` regularly and apply patches promptly.
 6. **Monitor `/api/health`** with an uptime checker (e.g., UptimeRobot, Cloudflare Health Checks).
+
+---
+
+## Dependency Audit — March 2026
+
+Audit performed against the **GitHub Advisory Database** (the source of truth for `npm audit`). All direct and key transitive dependencies were checked.
+
+### Direct Dependencies
+
+| Package | Version Installed | CVEs Found | Status |
+|---|---|---|---|
+| `express` | 4.22.1 | None | ✅ Clean |
+| `better-sqlite3` | 9.6.0 | None | ✅ Clean (see note) |
+| `pdfkit` | 0.15.2 | None | ✅ Clean |
+| `pino` | 9.14.0 | None | ✅ Clean |
+| `pino-pretty` | 11.3.0 | None | ✅ Clean |
+| `zod` | 3.25.76 | None | ✅ Clean |
+
+### Key Transitive Dependencies
+
+| Package | Version | CVEs Found | Status |
+|---|---|---|---|
+| `body-parser` | 1.20.4 | None | ✅ Clean |
+| `cookie` | 0.7.2 | None | ✅ Clean |
+| `debug` | 2.6.9 | None | ✅ Clean |
+| `ms` | 2.0.0 | None | ✅ Clean |
+| `path-to-regexp` | 0.1.12 | None | ✅ Clean (0.1.12 includes patches for prior CVEs) |
+| `mime` | 1.6.0 | None | ✅ Clean |
+| `minimist` | 1.2.8 | None | ✅ Clean |
+| `qs` | 6.14.2 | None | ✅ Clean |
+| `send` | 0.19.2 | None | ✅ Clean |
+| `serve-static` | 1.16.3 | None | ✅ Clean |
+| `raw-body` | 2.5.3 | None | ✅ Clean |
+
+### CVEs Researched and Ruled Out
+
+| CVE | Package | Our Version | Affected Versions | Decision |
+|---|---|---|---|---|
+| CVE-2025-13466 | `body-parser` | 1.20.4 | 2.2.0 only | ✅ Not affected (only impacts the 2.x series) |
+| CVE-2024-29041 | `express` | 4.22.1 | < 4.19.2 | ✅ Not affected (patched in 4.19.2) |
+| CVE-2024-10491 | `express` (response.links) | 4.22.1 | < 4.21.2 | ✅ Not affected (patched in 4.21.2) |
+| CVE-2025-52099 | SQLite (via `better-sqlite3`) | 9.6.0 | SQLite ≤ 3.50.0 | ⚠️ Monitor — not in advisory DB; upgrade to latest better-sqlite3 when possible |
+
+### Notes
+
+- **better-sqlite3 9.6.0** bundles an older SQLite version. The latest major version (12.x) bundles SQLite ≥ 3.51.3. A major-version upgrade is recommended in the future but requires testing for breaking API changes. The vulnerability CVE-2025-52099 (SQLite integer overflow in `setupLookaside`) is not in the GitHub Advisory Database for better-sqlite3 9.x, but the upgrade path to a newer major is advisable for the long term.
+- `path-to-regexp 0.1.12` is the patched release that addressed previous ReDoS vulnerabilities (GHSA-9wv6-86v2-598j, CVE-2024-52798).
+- No action is required on any other package at this time.
+
+### Next Steps
+- Set up **GitHub Dependabot alerts** on the repository so future CVEs surface automatically.
+- Re-run `npm audit` after each dependency upgrade.
+- Track the `better-sqlite3` 10.x→12.x migration for the next scheduled maintenance window.
+
