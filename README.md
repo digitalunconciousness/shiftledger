@@ -128,6 +128,8 @@ Press `?` in the app to open the shortcuts overlay at any time.
 
 **Goals**: `GET /api/goals`, `POST /api/goals`, `PUT /api/goals/:id`, `DELETE /api/goals/:id`
 
+**Households**: `GET /api/households/me`, `POST /api/households`, `POST /api/households/invite`, `GET /api/households/invitations`, `POST /api/households/invitations/:id/accept`, `POST /api/households/invitations/:id/decline`, `DELETE /api/households/leave`, `DELETE /api/households/members/:userId`
+
 **Analytics**: `GET /api/summary`, `GET /api/trends`, `GET /api/overtime`, `GET /api/tax-estimate`, `GET /api/analytics/effective-rate`, `GET /api/analytics/extremes`, `GET /api/analytics/tip-ratio`
 
 **Export**: `GET /api/export/pdf`, `GET /api/export/csv`, `POST /api/import/csv`

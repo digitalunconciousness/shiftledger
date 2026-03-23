@@ -374,6 +374,8 @@ function createRateLimiter(windowMs, maxRequests) {
 
 // Rate limiters for sensitive auth endpoints
 const authRateLimit = createRateLimiter(15 * 60 * 1000, 20); // 20 requests per 15 min
+// Rate limiter for household mutation endpoints to prevent spam/abuse
+const householdRateLimit = createRateLimiter(15 * 60 * 1000, 30); // 30 requests per 15 min
 
 // Auth middleware
 function authMiddleware(req, res, next) {
@@ -706,7 +708,7 @@ app.delete('/api/users/:id', authMiddleware, adminOnly, (req, res) => {
 // ── Household Routes ──────────────────────────────────────────────────────────
 
 // GET /api/households/me — current user's household info, members, and pending invitations
-app.get('/api/households/me', authMiddleware, (req, res) => {
+app.get('/api/households/me', authMiddleware, householdRateLimit, (req, res) => {
   const userId = req.user.id;
   const household = getUserHousehold(userId);
   if (!household) {
@@ -737,7 +739,7 @@ app.get('/api/households/me', authMiddleware, (req, res) => {
 });
 
 // POST /api/households — create a new household (user becomes admin)
-app.post('/api/households', authMiddleware, validate(HouseholdSchema), (req, res) => {
+app.post('/api/households', authMiddleware, householdRateLimit, validate(HouseholdSchema), (req, res) => {
   try {
     const userId = req.user.id;
     if (getUserHousehold(userId)) {
@@ -758,7 +760,7 @@ app.post('/api/households', authMiddleware, validate(HouseholdSchema), (req, res
 });
 
 // POST /api/households/invite — invite another user by username (household admin only)
-app.post('/api/households/invite', authMiddleware, validate(InviteSchema), (req, res) => {
+app.post('/api/households/invite', authMiddleware, householdRateLimit, validate(InviteSchema), (req, res) => {
   try {
     const userId = req.user.id;
     const household = getUserHousehold(userId);
@@ -791,7 +793,7 @@ app.post('/api/households/invite', authMiddleware, validate(InviteSchema), (req,
 });
 
 // GET /api/households/invitations — pending invitations for the current user
-app.get('/api/households/invitations', authMiddleware, (req, res) => {
+app.get('/api/households/invitations', authMiddleware, householdRateLimit, (req, res) => {
   const invitations = db.prepare(`
     SELECT hi.id, hi.household_id, hi.created_at, h.name as household_name,
            inv.display_name as invited_by_name, inv.username as invited_by_username
@@ -805,7 +807,7 @@ app.get('/api/households/invitations', authMiddleware, (req, res) => {
 });
 
 // POST /api/households/invitations/:id/accept — accept an invitation
-app.post('/api/households/invitations/:id/accept', authMiddleware, (req, res) => {
+app.post('/api/households/invitations/:id/accept', authMiddleware, householdRateLimit, (req, res) => {
   try {
     const invId = parseInt(req.params.id, 10);
     const inv = db.prepare("SELECT * FROM household_invitations WHERE id = ? AND status = 'pending'").get(invId);
@@ -828,7 +830,7 @@ app.post('/api/households/invitations/:id/accept', authMiddleware, (req, res) =>
 });
 
 // POST /api/households/invitations/:id/decline — decline an invitation
-app.post('/api/households/invitations/:id/decline', authMiddleware, (req, res) => {
+app.post('/api/households/invitations/:id/decline', authMiddleware, householdRateLimit, (req, res) => {
   const invId = parseInt(req.params.id, 10);
   const inv = db.prepare("SELECT * FROM household_invitations WHERE id = ? AND status = 'pending'").get(invId);
   if (!inv) return res.status(404).json({ error: 'Invitation not found or already handled' });
@@ -838,7 +840,7 @@ app.post('/api/households/invitations/:id/decline', authMiddleware, (req, res) =
 });
 
 // DELETE /api/households/leave — leave the current household
-app.delete('/api/households/leave', authMiddleware, (req, res) => {
+app.delete('/api/households/leave', authMiddleware, householdRateLimit, (req, res) => {
   try {
     const userId = req.user.id;
     const household = getUserHousehold(userId);
@@ -865,7 +867,7 @@ app.delete('/api/households/leave', authMiddleware, (req, res) => {
 });
 
 // DELETE /api/households/members/:userId — remove a member (household admin only)
-app.delete('/api/households/members/:userId', authMiddleware, (req, res) => {
+app.delete('/api/households/members/:userId', authMiddleware, householdRateLimit, (req, res) => {
   try {
     const requesterId = req.user.id;
     const targetId = parseInt(req.params.userId, 10);
