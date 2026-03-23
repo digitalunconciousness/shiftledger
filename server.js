@@ -732,7 +732,7 @@ app.post('/api/users/:id/reset-password', authMiddleware, adminOnly, passwordCha
 });
 
 // GET /api/audit-log — admin views audit log
-app.get('/api/audit-log', authMiddleware, adminOnly, (req, res) => {
+app.get('/api/audit-log', authMiddleware, adminOnly, authRateLimit, (req, res) => {
   const rows = db.prepare(`
     SELECT al.id, al.action, al.detail, al.created_at,
            a.username as actor_username, a.display_name as actor_display_name,
