@@ -193,6 +193,20 @@ canvas{max-height:280px}
 .user-info strong{font-size:.9rem}
 .user-info small{font-family:var(--mono);font-size:.7rem;color:var(--text-dim);display:block;margin-top:2px}
 
+/* ── Household ── */
+.hh-member{display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:8px}
+.hh-member .user-dot{width:14px;height:14px;flex-shrink:0}
+.hh-member-info{flex:1}
+.hh-member-info strong{font-size:.88rem}
+.hh-member-info small{font-family:var(--mono);font-size:.7rem;color:var(--text-dim);display:block;margin-top:1px}
+.hh-role-badge{font-family:var(--mono);font-size:.65rem;font-weight:600;padding:2px 8px;border-radius:99px;border:1px solid var(--border);color:var(--text-mute);text-transform:uppercase;letter-spacing:.05em}
+.hh-role-badge.admin{color:var(--amber);border-color:var(--amber);background:var(--amber-glow)}
+.hh-invitation{display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:8px;flex-wrap:wrap}
+.hh-invitation-info{flex:1;font-size:.85rem}
+.hh-invitation-info small{font-family:var(--mono);font-size:.7rem;color:var(--text-dim);display:block;margin-top:2px}
+.hh-invitation-actions{display:flex;gap:6px}
+tr.hh-other-member{opacity:.82}
+
 /* ── Scrollbar ── */
 ::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#333;border-radius:99px}::-webkit-scrollbar-thumb:hover{background:#555}
 
@@ -306,6 +320,9 @@ canvas{max-height:280px}
       <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/></svg>Reports
     </div>
     <div class="nav-section">Account</div>
+    <div class="nav-item" data-view="household" onclick="navigate(this)" role="button" tabindex="0">
+      <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Household
+    </div>
     <div class="nav-item" data-view="settings" onclick="navigate(this)" role="button" tabindex="0">
       <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>Settings
     </div>
@@ -393,7 +410,7 @@ canvas{max-height:280px}
       <div class="page-header" style="display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:12px">
         <div><h1 class="page-title">Shift History</h1><p class="page-sub">All recorded shifts</p></div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <div class="filter-toggle"><button class="filter-btn" onclick="setHistFilter(this,'')" data-uid="">All</button><button class="filter-btn active" onclick="setHistFilter(this,'mine')" data-uid="mine">Mine</button></div>
+          <div class="filter-toggle" id="hist-filter-toggle"><button class="filter-btn active" id="hist-btn-all" onclick="setHistFilter(this,'')" data-uid="">All</button><button class="filter-btn" id="hist-btn-mine" onclick="setHistFilter(this,'mine')" data-uid="mine">Mine</button></div>
           <input type="date" id="hist-from" style="width:140px" onchange="loadHistory()">
           <span style="color:var(--text-mute);font-family:var(--mono);font-size:.8rem">to</span>
           <input type="date" id="hist-to" style="width:140px" onchange="loadHistory()">
@@ -578,6 +595,66 @@ canvas{max-height:280px}
       </div>
     </div>
 
+    <!-- ── HOUSEHOLD ── -->
+    <div class="view" id="view-household">
+      <div class="page-header"><h1 class="page-title">Household</h1><p class="page-sub">Collaborate and share shift data with others</p></div>
+
+      <!-- Pending Invitations (shown for all users) -->
+      <div id="household-invitations-section" style="display:none;margin-bottom:20px">
+        <div class="card">
+          <div class="card-label" style="margin-bottom:12px">Pending Invitations</div>
+          <div id="household-invitations-list"></div>
+        </div>
+      </div>
+
+      <!-- Not in a household -->
+      <div id="household-create-section" style="display:none">
+        <div class="card" style="margin-bottom:20px">
+          <div class="card-label" style="margin-bottom:12px">Create a Household</div>
+          <p style="font-family:var(--mono);font-size:.78rem;color:var(--text-dim);margin-bottom:14px">Start a household so others can join and view your shift data.</p>
+          <div class="form-grid">
+            <div class="form-group"><label>Household Name</label><input id="hh-name" placeholder="e.g. Smith Family"></div>
+            <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="createHousehold()">Create Household</button></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- In a household -->
+      <div id="household-info-section" style="display:none">
+        <!-- Household header -->
+        <div class="card" style="margin-bottom:20px">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px">
+            <div>
+              <div class="card-label">Household</div>
+              <div id="household-name-display" style="font-size:1.3rem;font-weight:700;margin-top:4px"></div>
+              <div id="household-role-badge" style="margin-top:6px"></div>
+            </div>
+            <button class="btn btn-danger btn-sm" onclick="leaveHousehold()">Leave Household</button>
+          </div>
+        </div>
+
+        <!-- Members list -->
+        <div class="card" style="margin-bottom:20px">
+          <div class="card-label" style="margin-bottom:12px">Members</div>
+          <div id="household-members-list"></div>
+        </div>
+
+        <!-- Invite member (admin only) -->
+        <div id="household-invite-section" style="display:none">
+          <div class="card" style="margin-bottom:20px">
+            <div class="card-label" style="margin-bottom:12px">Invite a Member</div>
+            <p style="font-family:var(--mono);font-size:.78rem;color:var(--text-dim);margin-bottom:14px">Enter the username of the person you want to invite.</p>
+            <div class="form-grid">
+              <div class="form-group"><label>Username</label><input id="hh-invite-user" placeholder="username"></div>
+              <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="inviteToHousehold()">Send Invite</button></div>
+            </div>
+            <!-- Pending outgoing invitations -->
+            <div id="household-pending-outgoing" style="margin-top:14px"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </main>
 </div>
 
@@ -626,7 +703,8 @@ canvas{max-height:280px}
     <div class="shortcut-row"><span>Dashboard</span><span class="shortcut-key">2</span></div>
     <div class="shortcut-row"><span>History</span><span class="shortcut-key">3</span></div>
     <div class="shortcut-row"><span>Reports</span><span class="shortcut-key">4</span></div>
-    <div class="shortcut-row"><span>Settings</span><span class="shortcut-key">5</span></div>
+    <div class="shortcut-row"><span>Household</span><span class="shortcut-key">5</span></div>
+    <div class="shortcut-row"><span>Settings</span><span class="shortcut-key">6</span></div>
     <div class="shortcut-row"><span>Previous View</span><span class="shortcut-key">&lsqb;</span></div>
     <div class="shortcut-row"><span>Next View</span><span class="shortcut-key">&rsqb;</span></div>
     <div class="shortcut-row"><span>Save Shift</span><span class="shortcut-key">Ctrl+Enter</span></div>
@@ -730,7 +808,7 @@ function attachDecimalInput(id,digits=2){const input=$(id);if(!input)return;inpu
 function setupDecimalInputs(){['f-rate','f-hours','f-tips','e-rate','e-hours','e-tips','nj-rate','ng-amount','ntc-rate','ntc-flat','ej-rate','ej-ot-threshold','ej-ot-multiplier'].forEach(id=>attachDecimalInput(id,2))}
 
 // ── Navigation ──
-const viewKeys=['log','dashboard','history','reports','settings'];
+const viewKeys=['log','dashboard','history','reports','household','settings'];
 function navigate(el){
   document.querySelectorAll('.nav-item').forEach(n=>{n.classList.remove('active');n.removeAttribute('aria-current')});
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
@@ -741,6 +819,7 @@ function navigate(el){
   if(view==='dashboard')loadDashboard();
   if(view==='history')loadHistory();
   if(view==='settings')loadSettings();
+  if(view==='household')loadHousehold();
   // Close mobile sidebar
   $('sidebar').classList.remove('open');
   $('sidebar-overlay').classList.remove('open');
@@ -1010,7 +1089,8 @@ function renderEffRateChart(data){
 function setHistFilter(el,uid){
   el.parentElement.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
   el.classList.add('active');
-  histFilterUser=uid===''?'all':'';
+  // Admin 'All' button (uid='') shows all users; otherwise use uid directly
+  histFilterUser=(uid===''&&currentUser&&currentUser.is_admin)?'all':uid;
   loadHistory();
 }
 
@@ -1019,6 +1099,8 @@ async function loadHistory(){
   let url='/api/shifts?';
   if(from&&to)url+=`from=${from}&to=${to}&`;else if(from)url+=`from=${from}&`;
   if(histFilterUser==='all')url+=`user_id=all&`;
+  else if(histFilterUser==='mine')url+=`user_id=mine&`;
+  // else: no user_id → household-aware default (household members or own data)
   const shifts=await fetch(url).then(r=>r.json());
   const tbody=$('history-body');
   if(!shifts.length){tbody.innerHTML='<tr><td colspan="11" class="empty">No shifts found.</td></tr>';$('history-totals').style.display='none';return}
@@ -1026,9 +1108,10 @@ async function loadHistory(){
   tbody.innerHTML=shifts.map(s=>{
     totH+=s.hours_worked;totW+=s.wage_total;totT+=s.total_tips;totG+=s.grand_total;
     const tph=s.hours_worked>0?(s.total_tips/s.hours_worked).toFixed(2):'0.00';
-    const canEdit=currentUser&&(s.user_id===currentUser.id||currentUser.is_admin);
+    const isOwnShift=currentUser&&s.user_id===currentUser.id;
+    const canEdit=currentUser&&(isOwnShift||currentUser.is_admin);
     const dot=s.user_color?`<span class="user-dot" style="background:${s.user_color}" title="${esc(s.user_name||'')}"></span>`:'';
-    return `<tr>
+    return `<tr${!isOwnShift&&s.user_name?' class="hh-other-member"':''}>
       <td>${dot}</td><td>${s.date}</td><td>${esc(s.job_name||'—')}</td>
       <td>${s.hours_worked.toFixed(2)}</td><td>$${s.hourly_rate.toFixed(2)}</td>
       <td>$${s.wage_total.toFixed(2)}</td><td class="td-tips">$${tph}</td><td class="td-tips">$${s.total_tips.toFixed(2)}</td>
@@ -1394,7 +1477,7 @@ document.addEventListener('keydown',e=>{
   if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT')return;
   if(e.key==='?'){e.preventDefault();$('shortcut-overlay').classList.toggle('open');return}
   if(e.key==='Escape'){$('shortcut-overlay').classList.remove('open');closeEditModal();return}
-  const idx='12345'.indexOf(e.key);
+  const idx='123456'.indexOf(e.key);
   if(idx>=0&&idx<viewKeys.length){
     const navItems=document.querySelectorAll('.nav-item');
     if(navItems[idx])navigate(navItems[idx]);
@@ -1415,8 +1498,143 @@ document.addEventListener('keydown',e=>{
   }
 });
 
+// ── Household ──
+let householdData = null;
+
+async function loadHousehold() {
+  try {
+    const [hhRes, invRes] = await Promise.all([
+      fetch('/api/households/me'),
+      fetch('/api/households/invitations'),
+    ]);
+    const hh = await hhRes.json();
+    const invitations = await invRes.json();
+    householdData = hh.household;
+
+    // Pending incoming invitations (shown even if user is not in a household)
+    const invSection = $('household-invitations-section');
+    const invList = $('household-invitations-list');
+    if (invitations.length) {
+      invSection.style.display = 'block';
+      invList.innerHTML = invitations.map(inv => `
+        <div class="hh-invitation">
+          <div class="hh-invitation-info">
+            <strong>${esc(inv.household_name)}</strong>
+            <small>Invited by ${esc(inv.invited_by_name)} (@${esc(inv.invited_by_username)}) &middot; ${new Date(inv.created_at).toLocaleDateString()}</small>
+          </div>
+          <div class="hh-invitation-actions">
+            <button class="btn btn-primary btn-sm" onclick="acceptInvitation(${inv.id})">Accept</button>
+            <button class="btn btn-ghost btn-sm" onclick="declineInvitation(${inv.id})">Decline</button>
+          </div>
+        </div>`).join('');
+    } else {
+      invSection.style.display = 'none';
+    }
+
+    if (!hh.household) {
+      $('household-create-section').style.display = 'block';
+      $('household-info-section').style.display = 'none';
+    } else {
+      $('household-create-section').style.display = 'none';
+      $('household-info-section').style.display = 'block';
+      $('household-name-display').textContent = hh.household.name;
+      const roleBadge = $('household-role-badge');
+      roleBadge.innerHTML = `<span class="hh-role-badge ${hh.household.role === 'admin' ? 'admin' : ''}">${hh.household.role}</span>`;
+
+      // Members list
+      const membersList = $('household-members-list');
+      membersList.innerHTML = hh.members.map(m => `
+        <div class="hh-member">
+          <span class="user-dot" style="background:${m.color}"></span>
+          <div class="hh-member-info">
+            <strong>${esc(m.display_name)} <span style="color:var(--text-dim);font-weight:400;font-size:.8rem">@${esc(m.username)}</span>${m.id === (currentUser && currentUser.id) ? ' <span style="font-family:var(--mono);font-size:.65rem;color:var(--text-mute)">(you)</span>' : ''}</strong>
+            <small>Joined ${new Date(m.joined_at).toLocaleDateString()}</small>
+          </div>
+          <span class="hh-role-badge ${m.role === 'admin' ? 'admin' : ''}">${m.role}</span>
+          ${hh.household.role === 'admin' && m.id !== (currentUser && currentUser.id) ? `<button class="btn btn-danger btn-sm" onclick="removeMember(${m.id}, '${esc(m.display_name).replace(/'/g,'&#39;')}')">Remove</button>` : ''}
+        </div>`).join('') || '<div class="empty" style="padding:20px">No members yet.</div>';
+
+      // Invite section (admin only)
+      const inviteSection = $('household-invite-section');
+      if (hh.household.role === 'admin') {
+        inviteSection.style.display = 'block';
+        const pending = hh.pending_invitations;
+        const outgoing = $('household-pending-outgoing');
+        if (pending.length) {
+          outgoing.innerHTML = '<div class="card-label" style="margin-bottom:8px;margin-top:12px">Pending Invitations</div>' +
+            pending.map(p => `<div class="hh-member">
+              <div class="hh-member-info"><strong>${esc(p.invitee_display_name)}</strong><small>@${esc(p.invitee_username)} &middot; Sent ${new Date(p.created_at).toLocaleDateString()}</small></div>
+            </div>`).join('');
+        } else {
+          outgoing.innerHTML = '';
+        }
+      } else {
+        inviteSection.style.display = 'none';
+      }
+    }
+  } catch (e) {
+    toast('Failed to load household data', 'error');
+  }
+}
+
+async function createHousehold() {
+  const name = gv('hh-name');
+  if (!name) { toast('Enter a household name', 'error'); return; }
+  const res = await fetch('/api/households', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+  const data = await res.json();
+  if (!res.ok) { toast(data.error || 'Error', 'error'); return; }
+  toast('Household created!', 'success');
+  sv('hh-name', '');
+  loadHousehold();
+}
+
+async function inviteToHousehold() {
+  const username = gv('hh-invite-user');
+  if (!username) { toast('Enter a username', 'error'); return; }
+  const res = await fetch('/api/households/invite', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username }) });
+  const data = await res.json();
+  if (!res.ok) { toast(data.error || 'Error', 'error'); return; }
+  toast('Invitation sent!', 'success');
+  sv('hh-invite-user', '');
+  loadHousehold();
+}
+
+async function acceptInvitation(id) {
+  const res = await fetch('/api/households/invitations/' + id + '/accept', { method: 'POST' });
+  const data = await res.json();
+  if (!res.ok) { toast(data.error || 'Error', 'error'); return; }
+  toast('Joined household!', 'success');
+  loadHousehold();
+}
+
+async function declineInvitation(id) {
+  const res = await fetch('/api/households/invitations/' + id + '/decline', { method: 'POST' });
+  const data = await res.json();
+  if (!res.ok) { toast(data.error || 'Error', 'error'); return; }
+  toast('Invitation declined', 'success');
+  loadHousehold();
+}
+
+async function leaveHousehold() {
+  if (!confirm('Are you sure you want to leave this household?')) return;
+  const res = await fetch('/api/households/leave', { method: 'DELETE' });
+  const data = await res.json();
+  if (!res.ok) { toast(data.error || 'Error', 'error'); return; }
+  householdData = null;
+  toast('You have left the household', 'success');
+  loadHousehold();
+}
+
+async function removeMember(userId, displayName) {
+  if (!confirm('Remove ' + displayName + ' from the household?')) return;
+  const res = await fetch('/api/households/members/' + userId, { method: 'DELETE' });
+  const data = await res.json();
+  if (!res.ok) { toast(data.error || 'Error', 'error'); return; }
+  toast(displayName + ' removed', 'success');
+  loadHousehold();
+}
+
 // ── Service Worker ──
-if('serviceWorker' in navigator){
   let refreshing=false;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{
     if(refreshing)return;

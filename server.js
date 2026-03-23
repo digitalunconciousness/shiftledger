@@ -164,6 +164,38 @@ function migrate() {
         db.exec("ALTER TABLE jobs ADD COLUMN tip_payment TEXT NOT NULL DEFAULT 'cash'");
       }
     },
+    // v7: households, household_members, household_invitations tables
+    () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS households (
+          id         INTEGER PRIMARY KEY AUTOINCREMENT,
+          name       TEXT    NOT NULL,
+          created_by INTEGER NOT NULL REFERENCES users(id),
+          created_at TEXT    DEFAULT (datetime('now'))
+        )
+      `);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS household_members (
+          id           INTEGER PRIMARY KEY AUTOINCREMENT,
+          household_id INTEGER NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+          user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          role         TEXT    NOT NULL DEFAULT 'member',
+          joined_at    TEXT    DEFAULT (datetime('now')),
+          UNIQUE(household_id, user_id)
+        )
+      `);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS household_invitations (
+          id           INTEGER PRIMARY KEY AUTOINCREMENT,
+          household_id INTEGER NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+          invitee_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          invited_by   INTEGER NOT NULL REFERENCES users(id),
+          status       TEXT    NOT NULL DEFAULT 'pending',
+          created_at   TEXT    DEFAULT (datetime('now'))
+        )
+      `);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_hh_inv_invitee_status ON household_invitations(invitee_id, status)`);
+    },
   ];
 
   const tx = db.transaction(() => {
@@ -189,6 +221,50 @@ function resolveUserFilter(req) {
     if (param) return parseInt(param, 10) || req.user.id;
   }
   return req.user ? req.user.id : null;
+}
+
+// ── Household Helpers ─────────────────────────────────────────────────────────
+
+function getUserHousehold(userId) {
+  return db.prepare(`
+    SELECT h.id as household_id, h.name, hm.role
+    FROM household_members hm
+    JOIN households h ON hm.household_id = h.id
+    WHERE hm.user_id = ?
+  `).get(userId);
+}
+
+function getHouseholdMemberIds(householdId) {
+  return db.prepare('SELECT user_id FROM household_members WHERE household_id = ?')
+    .all(householdId)
+    .map(r => r.user_id);
+}
+
+// ── Shift Filter Helper (household-aware) ─────────────────────────────────────
+// Returns { clause, params } for the WHERE clause in shift queries.
+// Non-admins in a household see household members' shifts by default.
+// Passing user_id=mine always restricts to the current user only.
+function resolveShiftFilter(req) {
+  const param = req.query.user_id;
+  if (req.user && req.user.is_admin) {
+    if (param === 'all') return { clause: '', params: [] };
+    if (param && param !== 'mine') {
+      const uid = parseInt(param, 10) || req.user.id;
+      return { clause: ' AND s.user_id = ?', params: [uid] };
+    }
+    return { clause: ' AND s.user_id = ?', params: [req.user.id] };
+  }
+  const userId = req.user ? req.user.id : null;
+  if (!userId) return { clause: ' AND s.user_id IS NULL', params: [] };
+  if (param === 'mine') return { clause: ' AND s.user_id = ?', params: [userId] };
+
+  const membership = getUserHousehold(userId);
+  if (!membership) return { clause: ' AND s.user_id = ?', params: [userId] };
+
+  const memberIds = getHouseholdMemberIds(membership.household_id);
+  if (!memberIds.length) return { clause: ' AND s.user_id = ?', params: [userId] };
+  const placeholders = memberIds.map(() => '?').join(',');
+  return { clause: ` AND s.user_id IN (${placeholders})`, params: memberIds };
 }
 
 // ── Middleware ────────────────────────────────────────────────────────────────
@@ -388,6 +464,14 @@ const RegisterSchema = z.object({
 const LoginSchema = z.object({
   username: z.string(),
   password: z.string(),
+});
+
+const HouseholdSchema = z.object({
+  name: z.string().min(1).max(100),
+});
+
+const InviteSchema = z.object({
+  username: z.string().min(1),
 });
 
 function validate(schema) {
@@ -619,6 +703,189 @@ app.delete('/api/users/:id', authMiddleware, adminOnly, (req, res) => {
   res.json({ success: true });
 });
 
+// ── Household Routes ──────────────────────────────────────────────────────────
+
+// GET /api/households/me — current user's household info, members, and pending invitations
+app.get('/api/households/me', authMiddleware, (req, res) => {
+  const userId = req.user.id;
+  const household = getUserHousehold(userId);
+  if (!household) {
+    return res.json({ household: null, members: [], pending_invitations: [] });
+  }
+
+  const members = db.prepare(`
+    SELECT hm.user_id as id, hm.role, hm.joined_at, u.username, u.display_name, u.color
+    FROM household_members hm JOIN users u ON hm.user_id = u.id
+    WHERE hm.household_id = ? ORDER BY hm.joined_at ASC
+  `).all(household.household_id);
+
+  const pending = db.prepare(`
+    SELECT hi.id, hi.invitee_id, hi.created_at, u.username as invitee_username,
+           u.display_name as invitee_display_name, inv.display_name as invited_by_name
+    FROM household_invitations hi
+    JOIN users u ON hi.invitee_id = u.id
+    JOIN users inv ON hi.invited_by = inv.id
+    WHERE hi.household_id = ? AND hi.status = 'pending'
+    ORDER BY hi.created_at DESC
+  `).all(household.household_id);
+
+  res.json({
+    household: { id: household.household_id, name: household.name, role: household.role },
+    members,
+    pending_invitations: pending,
+  });
+});
+
+// POST /api/households — create a new household (user becomes admin)
+app.post('/api/households', authMiddleware, validate(HouseholdSchema), (req, res) => {
+  try {
+    const userId = req.user.id;
+    if (getUserHousehold(userId)) {
+      return res.status(409).json({ error: 'You are already in a household. Leave it first.' });
+    }
+    const { name } = req.validated;
+    const tx = db.transaction(() => {
+      const result = db.prepare('INSERT INTO households (name, created_by) VALUES (?,?)').run(name, userId);
+      db.prepare('INSERT INTO household_members (household_id, user_id, role) VALUES (?,?,?)').run(result.lastInsertRowid, userId, 'admin');
+      return result.lastInsertRowid;
+    });
+    const householdId = tx();
+    res.json({ success: true, household_id: householdId, name });
+  } catch (e) {
+    logger.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/households/invite — invite another user by username (household admin only)
+app.post('/api/households/invite', authMiddleware, validate(InviteSchema), (req, res) => {
+  try {
+    const userId = req.user.id;
+    const household = getUserHousehold(userId);
+    if (!household) return res.status(403).json({ error: 'You are not in a household' });
+    if (household.role !== 'admin') return res.status(403).json({ error: 'Only household admins can invite members' });
+
+    // Enforce a reasonable household size limit
+    const MAX_HOUSEHOLD_SIZE = 20;
+    const memberCount = db.prepare('SELECT COUNT(*) as c FROM household_members WHERE household_id = ?').get(household.household_id).c;
+    if (memberCount >= MAX_HOUSEHOLD_SIZE) return res.status(400).json({ error: `Household is full (max ${MAX_HOUSEHOLD_SIZE} members)` });
+
+    const { username } = req.validated;
+    const target = db.prepare('SELECT id, display_name FROM users WHERE username = ?').get(username);
+    if (!target) return res.status(404).json({ error: 'User not found' });
+    if (target.id === userId) return res.status(400).json({ error: 'Cannot invite yourself' });
+    if (getUserHousehold(target.id)) return res.status(409).json({ error: 'That user is already in a household' });
+
+    const existing = db.prepare(
+      "SELECT id FROM household_invitations WHERE household_id = ? AND invitee_id = ? AND status = 'pending'"
+    ).get(household.household_id, target.id);
+    if (existing) return res.status(409).json({ error: 'Invitation already sent' });
+
+    db.prepare('INSERT INTO household_invitations (household_id, invitee_id, invited_by) VALUES (?,?,?)')
+      .run(household.household_id, target.id, userId);
+    res.json({ success: true });
+  } catch (e) {
+    logger.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/households/invitations — pending invitations for the current user
+app.get('/api/households/invitations', authMiddleware, (req, res) => {
+  const invitations = db.prepare(`
+    SELECT hi.id, hi.household_id, hi.created_at, h.name as household_name,
+           inv.display_name as invited_by_name, inv.username as invited_by_username
+    FROM household_invitations hi
+    JOIN households h ON hi.household_id = h.id
+    JOIN users inv ON hi.invited_by = inv.id
+    WHERE hi.invitee_id = ? AND hi.status = 'pending'
+    ORDER BY hi.created_at DESC
+  `).all(req.user.id);
+  res.json(invitations);
+});
+
+// POST /api/households/invitations/:id/accept — accept an invitation
+app.post('/api/households/invitations/:id/accept', authMiddleware, (req, res) => {
+  try {
+    const invId = parseInt(req.params.id, 10);
+    const inv = db.prepare("SELECT * FROM household_invitations WHERE id = ? AND status = 'pending'").get(invId);
+    if (!inv) return res.status(404).json({ error: 'Invitation not found or already handled' });
+    if (inv.invitee_id !== req.user.id) return res.status(403).json({ error: 'Not your invitation' });
+    if (getUserHousehold(req.user.id)) return res.status(409).json({ error: 'You are already in a household. Leave it first.' });
+
+    const tx = db.transaction(() => {
+      db.prepare("UPDATE household_invitations SET status = 'accepted' WHERE id = ?").run(invId);
+      db.prepare('INSERT INTO household_members (household_id, user_id, role) VALUES (?,?,?)').run(inv.household_id, req.user.id, 'member');
+      // Decline all other pending invitations for this user
+      db.prepare("UPDATE household_invitations SET status = 'declined' WHERE invitee_id = ? AND id != ? AND status = 'pending'").run(req.user.id, invId);
+    });
+    tx();
+    res.json({ success: true });
+  } catch (e) {
+    logger.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/households/invitations/:id/decline — decline an invitation
+app.post('/api/households/invitations/:id/decline', authMiddleware, (req, res) => {
+  const invId = parseInt(req.params.id, 10);
+  const inv = db.prepare("SELECT * FROM household_invitations WHERE id = ? AND status = 'pending'").get(invId);
+  if (!inv) return res.status(404).json({ error: 'Invitation not found or already handled' });
+  if (inv.invitee_id !== req.user.id) return res.status(403).json({ error: 'Not your invitation' });
+  db.prepare("UPDATE household_invitations SET status = 'declined' WHERE id = ?").run(invId);
+  res.json({ success: true });
+});
+
+// DELETE /api/households/leave — leave the current household
+app.delete('/api/households/leave', authMiddleware, (req, res) => {
+  try {
+    const userId = req.user.id;
+    const household = getUserHousehold(userId);
+    if (!household) return res.status(400).json({ error: 'You are not in a household' });
+
+    const memberCount = db.prepare('SELECT COUNT(*) as c FROM household_members WHERE household_id = ?').get(household.household_id).c;
+    const tx = db.transaction(() => {
+      db.prepare('DELETE FROM household_members WHERE household_id = ? AND user_id = ?').run(household.household_id, userId);
+      if (memberCount <= 1) {
+        // Last member: dissolve the household
+        db.prepare('DELETE FROM households WHERE id = ?').run(household.household_id);
+      } else if (household.role === 'admin') {
+        // Promote oldest remaining member to admin
+        const next = db.prepare('SELECT user_id FROM household_members WHERE household_id = ? ORDER BY joined_at ASC LIMIT 1').get(household.household_id);
+        if (next) db.prepare("UPDATE household_members SET role = 'admin' WHERE household_id = ? AND user_id = ?").run(household.household_id, next.user_id);
+      }
+    });
+    tx();
+    res.json({ success: true });
+  } catch (e) {
+    logger.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /api/households/members/:userId — remove a member (household admin only)
+app.delete('/api/households/members/:userId', authMiddleware, (req, res) => {
+  try {
+    const requesterId = req.user.id;
+    const targetId = parseInt(req.params.userId, 10);
+    if (requesterId === targetId) return res.status(400).json({ error: 'Use the leave endpoint to remove yourself' });
+
+    const requesterHousehold = getUserHousehold(requesterId);
+    if (!requesterHousehold) return res.status(403).json({ error: 'You are not in a household' });
+    if (requesterHousehold.role !== 'admin') return res.status(403).json({ error: 'Only household admins can remove members' });
+
+    const targetMembership = db.prepare('SELECT * FROM household_members WHERE household_id = ? AND user_id = ?').get(requesterHousehold.household_id, targetId);
+    if (!targetMembership) return res.status(404).json({ error: 'User is not a member of your household' });
+
+    db.prepare('DELETE FROM household_members WHERE household_id = ? AND user_id = ?').run(requesterHousehold.household_id, targetId);
+    res.json({ success: true });
+  } catch (e) {
+    logger.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── Shift Routes (all require auth) ─────────────────────────────────────────
 
 app.post('/api/shifts', authMiddleware, validate(ShiftSchema), (req, res) => {
@@ -643,13 +910,14 @@ app.post('/api/shifts', authMiddleware, validate(ShiftSchema), (req, res) => {
 
 app.get('/api/shifts', authMiddleware, (req, res) => {
   const { from, to } = req.query;
-  const filterUser = resolveUserFilter(req);
+  const shiftFilter = resolveShiftFilter(req);
   let query = 'SELECT s.*, u.display_name as user_name, u.color as user_color, j.name as job_name, j.color as job_color FROM shifts s LEFT JOIN users u ON s.user_id = u.id LEFT JOIN jobs j ON s.job_id = j.id WHERE s.deleted_at IS NULL';
   const params = [];
 
   if (from && to) { query += ' AND s.date >= ? AND s.date <= ?'; params.push(from, to); }
   else if (from) { query += ' AND s.date >= ?'; params.push(from); }
-  if (filterUser !== null) { query += ' AND s.user_id = ?'; params.push(filterUser); }
+  query += shiftFilter.clause;
+  params.push(...shiftFilter.params);
   query += ' ORDER BY s.date DESC, s.id DESC';
 
   res.json(db.prepare(query).all(...params));
