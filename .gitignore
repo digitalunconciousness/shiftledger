@@ -6,3 +6,4 @@ backups/
 *.log
 mobile/node_modules/
 mobile/.expo/
+mobile/.env
