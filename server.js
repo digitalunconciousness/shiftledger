@@ -164,6 +164,68 @@ function migrate() {
         db.exec("ALTER TABLE jobs ADD COLUMN tip_payment TEXT NOT NULL DEFAULT 'cash'");
       }
     },
+    // v7: user-scoped jobs, templates, goals, and per-user tax_config
+    () => {
+      const jobCols = db.prepare('PRAGMA table_info(jobs)').all().map(c => c.name);
+      if (!jobCols.includes('user_id')) {
+        db.exec('ALTER TABLE jobs ADD COLUMN user_id INTEGER REFERENCES users(id)');
+      }
+      const tplCols = db.prepare('PRAGMA table_info(templates)').all().map(c => c.name);
+      if (!tplCols.includes('user_id')) {
+        db.exec('ALTER TABLE templates ADD COLUMN user_id INTEGER REFERENCES users(id)');
+      }
+      const goalCols = db.prepare('PRAGMA table_info(goals)').all().map(c => c.name);
+      if (!goalCols.includes('user_id')) {
+        db.exec('ALTER TABLE goals ADD COLUMN user_id INTEGER REFERENCES users(id)');
+      }
+      const taxCols = db.prepare('PRAGMA table_info(tax_config)').all().map(c => c.name);
+      if (!taxCols.includes('user_id')) {
+        db.exec('ALTER TABLE tax_config ADD COLUMN user_id INTEGER REFERENCES users(id)');
+      }
+    },
+    // v8: households feature
+    () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS households (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          name        TEXT    NOT NULL,
+          created_by  INTEGER REFERENCES users(id),
+          invite_code TEXT    NOT NULL UNIQUE,
+          created_at  TEXT    DEFAULT (datetime('now'))
+        )
+      `);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS household_members (
+          id           INTEGER PRIMARY KEY AUTOINCREMENT,
+          household_id INTEGER NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+          user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          joined_at    TEXT    DEFAULT (datetime('now')),
+          UNIQUE(household_id, user_id)
+        )
+      `);
+    },
+    // v9: fix tax_config UNIQUE constraint to allow per-user rows (key+user_id unique)
+    () => {
+      // Recreate tax_config with composite unique constraint
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS tax_config_new (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          key         TEXT    NOT NULL,
+          label       TEXT    NOT NULL,
+          rate        REAL    NOT NULL DEFAULT 0,
+          flat_amount REAL    NOT NULL DEFAULT 0,
+          enabled     INTEGER NOT NULL DEFAULT 1,
+          sort_order  INTEGER NOT NULL DEFAULT 0,
+          user_id     INTEGER REFERENCES users(id),
+          UNIQUE(key, user_id)
+        )
+      `);
+      // Copy existing rows (all will have user_id=NULL from old schema)
+      db.exec(`INSERT OR IGNORE INTO tax_config_new (id, key, label, rate, flat_amount, enabled, sort_order, user_id)
+               SELECT id, key, label, rate, flat_amount, enabled, sort_order, user_id FROM tax_config`);
+      db.exec('DROP TABLE tax_config');
+      db.exec('ALTER TABLE tax_config_new RENAME TO tax_config');
+    },
   ];
 
   const tx = db.transaction(() => {
@@ -178,17 +240,43 @@ function migrate() {
 
 migrate();
 
-// ── User Filter Helper ────────────────────────────────────────────────────────
-// Returns the user_id to filter by, or null to return all users' data.
-// Non-admins always get their own data. Admins can pass user_id=all (all users)
-// or user_id=<id> (specific user). Omitting user_id defaults to current user.
+// ── User Filter Helpers ───────────────────────────────────────────────────────
+
+// Returns all user IDs visible to the given user: their own plus any household members.
+function getVisibleUserIds(userId) {
+  const rows = db.prepare(`
+    SELECT DISTINCT hm2.user_id
+    FROM household_members hm1
+    JOIN household_members hm2 ON hm1.household_id = hm2.household_id
+    WHERE hm1.user_id = ?
+  `).all(userId);
+  const ids = rows.map(r => r.user_id);
+  return [...new Set([userId, ...ids])];
+}
+
+// Returns an array of user IDs to filter by, or null to show all users' data.
+// Non-admins always see their own + household members' data.
+// Admins can pass user_id=all (all data) or user_id=<id> (specific user).
+// Omitting user_id defaults to current user for both roles.
 function resolveUserFilter(req) {
   const param = req.query.user_id;
   if (req.user && req.user.is_admin) {
     if (param === 'all') return null;
-    if (param) return parseInt(param, 10) || req.user.id;
+    if (param) return [parseInt(param, 10) || req.user.id];
+    return [req.user.id];
   }
-  return req.user ? req.user.id : null;
+  if (!req.user) return null;
+  return getVisibleUserIds(req.user.id);
+}
+
+// Appends an IN-clause user_id filter to a SQL string and params array.
+// filterUser: null (no filter) or array of user IDs.
+// column: the column expression to filter on (default 'user_id').
+function appendUserFilter(sql, params, filterUser, column = 'user_id') {
+  if (filterUser === null) return sql;
+  const placeholders = filterUser.map(() => '?').join(',');
+  params.push(...filterUser);
+  return sql + ` AND ${column} IN (${placeholders})`;
 }
 
 // ── Middleware ────────────────────────────────────────────────────────────────
@@ -582,9 +670,23 @@ app.post('/api/auth/refresh', authRateLimit, (req, res) => {
 
 // ── User Management Routes ───────────────────────────────────────────────────
 
-app.get('/api/users', authMiddleware, (req, res) => {
+app.get('/api/users', authMiddleware, adminOnly, (req, res) => {
   const users = db.prepare('SELECT id, username, display_name, is_admin, color, created_at FROM users').all();
   res.json(users);
+});
+
+// GET /api/profile — current user's profile + household membership
+app.get('/api/profile', authMiddleware, (req, res) => {
+  const user = db.prepare('SELECT id, username, display_name, is_admin, color, created_at FROM users WHERE id = ?').get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  const households = db.prepare(`
+    SELECT h.id, h.name, h.invite_code, h.created_by,
+           (SELECT COUNT(*) FROM household_members WHERE household_id = h.id) as member_count
+    FROM households h
+    JOIN household_members hm ON h.id = hm.household_id
+    WHERE hm.user_id = ?
+  `).all(req.user.id);
+  res.json({ ...user, households });
 });
 
 app.put('/api/users/:id', authMiddleware, async (req, res) => {
@@ -619,6 +721,126 @@ app.delete('/api/users/:id', authMiddleware, adminOnly, (req, res) => {
   res.json({ success: true });
 });
 
+// ── Household Routes ─────────────────────────────────────────────────────────
+
+const HouseholdSchema = z.object({
+  name: z.string().min(1).max(100),
+});
+
+// GET /api/households — list households the current user belongs to
+app.get('/api/households', authMiddleware, (req, res) => {
+  const households = db.prepare(`
+    SELECT h.id, h.name, h.invite_code, h.created_by, h.created_at,
+           (SELECT COUNT(*) FROM household_members WHERE household_id = h.id) as member_count
+    FROM households h
+    JOIN household_members hm ON h.id = hm.household_id
+    WHERE hm.user_id = ?
+    ORDER BY h.name ASC
+  `).all(req.user.id);
+  res.json(households);
+});
+
+// GET /api/households/:id/members — list members of a household
+app.get('/api/households/:id/members', authMiddleware, (req, res) => {
+  const householdId = parseInt(req.params.id, 10);
+  const membership = db.prepare('SELECT * FROM household_members WHERE household_id = ? AND user_id = ?').get(householdId, req.user.id);
+  if (!membership && !req.user.is_admin) return res.status(403).json({ error: 'Not a member of this household' });
+  const members = db.prepare(`
+    SELECT u.id, u.username, u.display_name, u.color, hm.joined_at
+    FROM household_members hm
+    JOIN users u ON hm.user_id = u.id
+    WHERE hm.household_id = ?
+    ORDER BY hm.joined_at ASC
+  `).all(householdId);
+  res.json(members);
+});
+
+// POST /api/households — create a new household (creator auto-joins)
+app.post('/api/households', authMiddleware, validate(HouseholdSchema), (req, res) => {
+  try {
+    const { name } = req.validated;
+    const inviteCode = crypto.randomBytes(6).toString('hex');
+    const result = db.prepare('INSERT INTO households (name, created_by, invite_code) VALUES (?,?,?)')
+      .run(name, req.user.id, inviteCode);
+    const householdId = result.lastInsertRowid;
+    db.prepare('INSERT INTO household_members (household_id, user_id) VALUES (?,?)').run(householdId, req.user.id);
+    res.json({ id: householdId, name, invite_code: inviteCode, created_by: req.user.id, member_count: 1 });
+  } catch (e) {
+    logger.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/households/join — join a household via invite code
+app.post('/api/households/join', authMiddleware, (req, res) => {
+  try {
+    const { invite_code } = req.body;
+    if (!invite_code) return res.status(400).json({ error: 'invite_code required' });
+    const household = db.prepare('SELECT * FROM households WHERE invite_code = ?').get(invite_code.trim());
+    if (!household) return res.status(404).json({ error: 'Invalid invite code' });
+    const existing = db.prepare('SELECT * FROM household_members WHERE household_id = ? AND user_id = ?').get(household.id, req.user.id);
+    if (existing) return res.status(409).json({ error: 'Already a member of this household' });
+    db.prepare('INSERT INTO household_members (household_id, user_id) VALUES (?,?)').run(household.id, req.user.id);
+    const memberCount = db.prepare('SELECT COUNT(*) as c FROM household_members WHERE household_id = ?').get(household.id).c;
+    res.json({ success: true, household: { id: household.id, name: household.name, member_count: memberCount } });
+  } catch (e) {
+    logger.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /api/households/:id/leave — leave a household
+app.delete('/api/households/:id/leave', authMiddleware, (req, res) => {
+  const householdId = parseInt(req.params.id, 10);
+  const membership = db.prepare('SELECT * FROM household_members WHERE household_id = ? AND user_id = ?').get(householdId, req.user.id);
+  if (!membership) return res.status(404).json({ error: 'Not a member of this household' });
+  db.prepare('DELETE FROM household_members WHERE household_id = ? AND user_id = ?').run(householdId, req.user.id);
+  // If no members left, delete the household
+  const remaining = db.prepare('SELECT COUNT(*) as c FROM household_members WHERE household_id = ?').get(householdId).c;
+  if (remaining === 0) db.prepare('DELETE FROM households WHERE id = ?').run(householdId);
+  res.json({ success: true });
+});
+
+// DELETE /api/households/:id — delete a household (creator or admin only)
+app.delete('/api/households/:id', authMiddleware, (req, res) => {
+  const householdId = parseInt(req.params.id, 10);
+  const household = db.prepare('SELECT * FROM households WHERE id = ?').get(householdId);
+  if (!household) return res.status(404).json({ error: 'Household not found' });
+  if (household.created_by !== req.user.id && !req.user.is_admin) {
+    return res.status(403).json({ error: 'Only the household creator or an admin can delete it' });
+  }
+  db.prepare('DELETE FROM households WHERE id = ?').run(householdId);
+  res.json({ success: true });
+});
+
+// PUT /api/households/:id — rename a household (creator or admin only)
+app.put('/api/households/:id', authMiddleware, validate(HouseholdSchema), (req, res) => {
+  const householdId = parseInt(req.params.id, 10);
+  const household = db.prepare('SELECT * FROM households WHERE id = ?').get(householdId);
+  if (!household) return res.status(404).json({ error: 'Household not found' });
+  if (household.created_by !== req.user.id && !req.user.is_admin) {
+    return res.status(403).json({ error: 'Only the household creator or an admin can rename it' });
+  }
+  const { name } = req.validated;
+  db.prepare('UPDATE households SET name = ? WHERE id = ?').run(name, householdId);
+  res.json({ success: true });
+});
+
+// DELETE /api/households/:id/members/:userId — remove a member (creator or admin only)
+app.delete('/api/households/:id/members/:userId', authMiddleware, (req, res) => {
+  const householdId = parseInt(req.params.id, 10);
+  const targetUserId = parseInt(req.params.userId, 10);
+  const household = db.prepare('SELECT * FROM households WHERE id = ?').get(householdId);
+  if (!household) return res.status(404).json({ error: 'Household not found' });
+  if (household.created_by !== req.user.id && !req.user.is_admin && req.user.id !== targetUserId) {
+    return res.status(403).json({ error: 'Not authorized to remove this member' });
+  }
+  db.prepare('DELETE FROM household_members WHERE household_id = ? AND user_id = ?').run(householdId, targetUserId);
+  const remaining = db.prepare('SELECT COUNT(*) as c FROM household_members WHERE household_id = ?').get(householdId).c;
+  if (remaining === 0) db.prepare('DELETE FROM households WHERE id = ?').run(householdId);
+  res.json({ success: true });
+});
+
 // ── Shift Routes (all require auth) ─────────────────────────────────────────
 
 app.post('/api/shifts', authMiddleware, validate(ShiftSchema), (req, res) => {
@@ -649,7 +871,7 @@ app.get('/api/shifts', authMiddleware, (req, res) => {
 
   if (from && to) { query += ' AND s.date >= ? AND s.date <= ?'; params.push(from, to); }
   else if (from) { query += ' AND s.date >= ?'; params.push(from); }
-  if (filterUser !== null) { query += ' AND s.user_id = ?'; params.push(filterUser); }
+  query = appendUserFilter(query, params, filterUser, 's.user_id');
   query += ' ORDER BY s.date DESC, s.id DESC';
 
   res.json(db.prepare(query).all(...params));
@@ -700,15 +922,22 @@ app.post('/api/shifts/:id/restore', authMiddleware, (req, res) => {
 // ── Jobs Routes ──────────────────────────────────────────────────────────────
 
 app.get('/api/jobs', authMiddleware, (req, res) => {
-  res.json(db.prepare('SELECT * FROM jobs ORDER BY name ASC').all());
+  // Return the user's own jobs plus global (user_id IS NULL) jobs
+  if (!req.user) return res.json(db.prepare('SELECT * FROM jobs WHERE user_id IS NULL ORDER BY name ASC').all());
+  const visibleIds = getVisibleUserIds(req.user.id);
+  const placeholders = visibleIds.map(() => '?').join(',');
+  res.json(db.prepare(
+    `SELECT * FROM jobs WHERE (user_id IS NULL OR user_id IN (${placeholders})) ORDER BY name ASC`
+  ).all(...visibleIds));
 });
 
 app.post('/api/jobs', authMiddleware, validate(JobSchema), (req, res) => {
   try {
     const { name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment } = req.validated;
-    const result = db.prepare('INSERT INTO jobs (name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment) VALUES (?,?,?,?,?,?)')
-      .run(name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment);
-    res.json({ id: result.lastInsertRowid, name, default_rate, color, tip_payment });
+    const userId = req.user ? req.user.id : null;
+    const result = db.prepare('INSERT INTO jobs (name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, user_id) VALUES (?,?,?,?,?,?,?)')
+      .run(name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, userId);
+    res.json({ id: result.lastInsertRowid, name, default_rate, color, tip_payment, user_id: userId });
   } catch (e) {
     logger.error(e);
     res.status(500).json({ error: e.message });
@@ -717,6 +946,15 @@ app.post('/api/jobs', authMiddleware, validate(JobSchema), (req, res) => {
 
 app.put('/api/jobs/:id', authMiddleware, validate(JobSchema), (req, res) => {
   try {
+    const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(req.params.id);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    // Only owner or admin can edit; global jobs (user_id IS NULL) admin-only
+    if (job.user_id !== null && job.user_id !== req.user.id && !req.user.is_admin) {
+      return res.status(403).json({ error: 'Not your job' });
+    }
+    if (job.user_id === null && !req.user.is_admin) {
+      return res.status(403).json({ error: 'Only admins can edit global jobs' });
+    }
     const { name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment } = req.validated;
     db.prepare('UPDATE jobs SET name=?, default_rate=?, color=?, overtime_threshold=?, overtime_multiplier=?, tip_payment=? WHERE id=?')
       .run(name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, req.params.id);
@@ -728,6 +966,14 @@ app.put('/api/jobs/:id', authMiddleware, validate(JobSchema), (req, res) => {
 });
 
 app.delete('/api/jobs/:id', authMiddleware, (req, res) => {
+  const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(req.params.id);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+  if (job.user_id !== null && job.user_id !== req.user.id && !req.user.is_admin) {
+    return res.status(403).json({ error: 'Not your job' });
+  }
+  if (job.user_id === null && !req.user.is_admin) {
+    return res.status(403).json({ error: 'Only admins can delete global jobs' });
+  }
   db.prepare('UPDATE jobs SET archived = 1 WHERE id = ?').run(req.params.id);
   res.json({ success: true });
 });
@@ -983,29 +1229,63 @@ app.post('/api/tax-profiles/refresh', authMiddleware, adminOnly, (req, res) => {
   }
 });
 
-app.post('/api/tax-profiles/apply/:profileId', authMiddleware, adminOnly, (req, res) => {
+app.post('/api/tax-profiles/apply/:profileId', authMiddleware, (req, res) => {
   const profile = TAX_PROFILES.find(p => p.id === req.params.profileId);
   if (!profile) return res.status(404).json({ error: 'Profile not found' });
 
-  const update = db.prepare('UPDATE tax_config SET rate = ? WHERE key = ?');
-  const results = {};
+  const userId = req.user.id;
+  const isAdmin = req.user.is_admin;
+
   const tx = db.transaction(() => {
+    const results = {};
     for (const [key, rate] of Object.entries(profile.rates)) {
-      const info = update.run(rate, key);
-      results[key] = info.changes > 0 ? 'updated' : 'not_found';
+      if (isAdmin) {
+        // Admin: update global (user_id IS NULL) entries
+        const info = db.prepare('UPDATE tax_config SET rate = ? WHERE key = ? AND user_id IS NULL').run(rate, key);
+        results[key] = info.changes > 0 ? 'updated' : 'not_found';
+      } else {
+        // User: upsert their own per-user entry for each key
+        const existing = db.prepare('SELECT * FROM tax_config WHERE key = ? AND user_id = ?').get(key, userId);
+        if (existing) {
+          db.prepare('UPDATE tax_config SET rate = ? WHERE id = ?').run(rate, existing.id);
+          results[key] = 'updated';
+        } else {
+          const global = db.prepare('SELECT * FROM tax_config WHERE key = ? AND user_id IS NULL').get(key);
+          const maxOrder = db.prepare('SELECT MAX(sort_order) as m FROM tax_config WHERE user_id = ?').get(userId).m || 0;
+          db.prepare('INSERT INTO tax_config (key, label, rate, flat_amount, enabled, sort_order, user_id) VALUES (?,?,?,?,?,?,?)')
+            .run(key, global ? global.label : key, rate, global ? global.flat_amount : 0, 1, maxOrder + 1, userId);
+          results[key] = 'created';
+        }
+      }
     }
+    return results;
   });
-  tx();
+  const results = tx();
   res.json({ success: true, profile: profile.id, applied: results });
 });
 
 // ── Tax Config Routes ─────────────────────────────────────────────────────────
 
 app.get('/api/tax-config', authMiddleware, (req, res) => {
-  res.json(db.prepare('SELECT * FROM tax_config ORDER BY sort_order ASC').all());
+  // Return user-specific entries if they exist, otherwise fall back to global defaults
+  const userId = req.user ? req.user.id : null;
+  if (!userId || req.user.is_admin) {
+    // Admin sees global config
+    return res.json(db.prepare('SELECT * FROM tax_config WHERE user_id IS NULL ORDER BY sort_order ASC').all());
+  }
+  // For regular users: merge global defaults with user overrides
+  const globalRows = db.prepare('SELECT * FROM tax_config WHERE user_id IS NULL ORDER BY sort_order ASC').all();
+  const userRows = db.prepare('SELECT * FROM tax_config WHERE user_id = ? ORDER BY sort_order ASC').all(userId);
+  const userMap = {};
+  userRows.forEach(r => { userMap[r.key] = r; });
+  // Override global with user-specific entries; append user-only entries
+  const globalKeys = new Set(globalRows.map(r => r.key));
+  const merged = globalRows.map(r => userMap[r.key] || r);
+  const userOnly = userRows.filter(r => !globalKeys.has(r.key));
+  res.json([...merged, ...userOnly]);
 });
 
-app.put('/api/tax-config/:id', authMiddleware, adminOnly, (req, res) => {
+app.put('/api/tax-config/:id', authMiddleware, (req, res) => {
   try {
     const { label, rate, flat_amount, enabled } = req.body;
     const id = parseInt(req.params.id, 10);
@@ -1013,19 +1293,27 @@ app.put('/api/tax-config/:id', authMiddleware, adminOnly, (req, res) => {
     if (flat_amount !== undefined && (isNaN(flat_amount) || flat_amount < 0)) return res.status(400).json({ error: 'Flat amount must be >= 0' });
     const row = db.prepare('SELECT * FROM tax_config WHERE id = ?').get(id);
     if (!row) return res.status(404).json({ error: 'Tax config not found' });
+    // Only admin can edit global (user_id IS NULL) entries; users can edit their own
+    if (row.user_id === null && !req.user.is_admin) {
+      return res.status(403).json({ error: 'Only admins can edit global tax rates' });
+    }
+    if (row.user_id !== null && row.user_id !== req.user.id && !req.user.is_admin) {
+      return res.status(403).json({ error: 'Not your tax rate' });
+    }
     db.prepare('UPDATE tax_config SET label=?, rate=?, flat_amount=?, enabled=? WHERE id=?')
       .run(label ?? row.label, rate ?? row.rate, flat_amount ?? row.flat_amount, enabled !== undefined ? (enabled ? 1 : 0) : row.enabled, id);
     res.json({ success: true });
   } catch (e) { logger.error(e); res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/tax-config', authMiddleware, adminOnly, (req, res) => {
+app.post('/api/tax-config', authMiddleware, (req, res) => {
   try {
     const { key, label, rate, flat_amount } = req.body;
     if (!key || !label) return res.status(400).json({ error: 'Key and label required' });
-    const maxOrder = db.prepare('SELECT MAX(sort_order) as m FROM tax_config').get().m || 0;
-    const result = db.prepare('INSERT INTO tax_config (key, label, rate, flat_amount, enabled, sort_order) VALUES (?,?,?,?,1,?)')
-      .run(key, label, rate || 0, flat_amount || 0, maxOrder + 1);
+    const userId = req.user.is_admin ? null : req.user.id;
+    const maxOrder = db.prepare('SELECT MAX(sort_order) as m FROM tax_config WHERE user_id IS ?').get(userId).m || 0;
+    const result = db.prepare('INSERT INTO tax_config (key, label, rate, flat_amount, enabled, sort_order, user_id) VALUES (?,?,?,?,1,?,?)')
+      .run(key, label, rate || 0, flat_amount || 0, maxOrder + 1, userId);
     res.json({ id: result.lastInsertRowid });
   } catch (e) {
     if (e.message.includes('UNIQUE')) return res.status(409).json({ error: 'Key already exists' });
@@ -1033,7 +1321,15 @@ app.post('/api/tax-config', authMiddleware, adminOnly, (req, res) => {
   }
 });
 
-app.delete('/api/tax-config/:id', authMiddleware, adminOnly, (req, res) => {
+app.delete('/api/tax-config/:id', authMiddleware, (req, res) => {
+  const row = db.prepare('SELECT * FROM tax_config WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Tax config not found' });
+  if (row.user_id === null && !req.user.is_admin) {
+    return res.status(403).json({ error: 'Only admins can delete global tax rates' });
+  }
+  if (row.user_id !== null && row.user_id !== req.user.id && !req.user.is_admin) {
+    return res.status(403).json({ error: 'Not your tax rate' });
+  }
   db.prepare('DELETE FROM tax_config WHERE id = ?').run(req.params.id);
   res.json({ success: true });
 });
@@ -1113,19 +1409,24 @@ app.get('/api/paycheck-estimate', authMiddleware, (req, res) => {
     const prevFrom = fmt(pp.prevStart), prevTo = fmt(pp.prevEnd);
 
     const filterUser = resolveUserFilter(req);
-    const userWhere = filterUser !== null ? ' AND user_id = ?' : '';
-    const userParam = filterUser !== null ? [filterUser] : [];
+    let sumBase = 'FROM shifts WHERE date >= ? AND date <= ? AND deleted_at IS NULL';
+    const userWhere = filterUser !== null
+      ? ` AND user_id IN (${filterUser.map(() => '?').join(',')})`
+      : '';
+    const userParam = filterUser !== null ? filterUser : [];
 
     // Sum all shifts in the period
     const sumQuery = `SELECT COALESCE(SUM(wage_total),0) as wages, COALESCE(SUM(total_tips),0) as tips,
       COALESCE(SUM(grand_total),0) as gross, COALESCE(SUM(hours_worked),0) as hours, COUNT(*) as shifts
-      FROM shifts WHERE date >= ? AND date <= ? AND deleted_at IS NULL${userWhere}`;
+      ${sumBase}${userWhere}`;
 
     const current = db.prepare(sumQuery).get(from, to, ...userParam);
     const previous = db.prepare(sumQuery).get(prevFrom, prevTo, ...userParam);
 
     // Split tips by payment method (cash vs paycheck) based on each shift's job setting
-    const tipSplitWhere = filterUser !== null ? ' AND s.user_id = ?' : '';
+    const tipSplitWhere = filterUser !== null
+      ? ` AND s.user_id IN (${filterUser.map(() => '?').join(',')})`
+      : '';
     const tipSplitQuery = `SELECT
       COALESCE(SUM(CASE WHEN COALESCE(j.tip_payment,'cash')='cash' THEN s.total_tips ELSE 0 END),0) as cash_tips,
       COALESCE(SUM(CASE WHEN COALESCE(j.tip_payment,'cash')='paycheck' THEN s.total_tips ELSE 0 END),0) as paycheck_tips
@@ -1137,8 +1438,21 @@ app.get('/api/paycheck-estimate', authMiddleware, (req, res) => {
     // Paycheck gross = wages + paycheck tips (cash tips already received nightly)
     const paycheckGross = current.wages + tipSplit.paycheck_tips;
 
-    // Get tax config
-    const taxes = db.prepare('SELECT * FROM tax_config WHERE enabled = 1 ORDER BY sort_order ASC').all();
+    // Get tax config — use user-specific entries if available, fall back to global
+    let taxes;
+    if (req.user && !req.user.is_admin) {
+      const userId = req.user.id;
+      const globalRows = db.prepare('SELECT * FROM tax_config WHERE user_id IS NULL AND enabled = 1 ORDER BY sort_order ASC').all();
+      const userRows = db.prepare('SELECT * FROM tax_config WHERE user_id = ? AND enabled = 1 ORDER BY sort_order ASC').all(userId);
+      const userMap = {};
+      userRows.forEach(r => { userMap[r.key] = r; });
+      const globalKeys = new Set(globalRows.map(r => r.key));
+      const merged = globalRows.map(r => userMap[r.key] || r);
+      const userOnly = userRows.filter(r => !globalKeys.has(r.key));
+      taxes = [...merged, ...userOnly];
+    } else {
+      taxes = db.prepare('SELECT * FROM tax_config WHERE user_id IS NULL AND enabled = 1 ORDER BY sort_order ASC').all();
+    }
 
     // Calculate itemized taxes — taxes apply to ALL income (including cash tips)
     let totalTax = 0;
@@ -1212,14 +1526,21 @@ app.get('/api/paycheck-estimate', authMiddleware, (req, res) => {
 // ── Templates Routes ─────────────────────────────────────────────────────────
 
 app.get('/api/templates', authMiddleware, (req, res) => {
-  res.json(db.prepare('SELECT t.*, j.name as job_name FROM templates t LEFT JOIN jobs j ON t.job_id = j.id ORDER BY t.name ASC').all());
+  if (!req.user) return res.json([]);
+  const visibleIds = getVisibleUserIds(req.user.id);
+  const placeholders = visibleIds.map(() => '?').join(',');
+  res.json(db.prepare(
+    `SELECT t.*, j.name as job_name FROM templates t LEFT JOIN jobs j ON t.job_id = j.id
+     WHERE t.user_id IS NULL OR t.user_id IN (${placeholders}) ORDER BY t.name ASC`
+  ).all(...visibleIds));
 });
 
 app.post('/api/templates', authMiddleware, validate(TemplateSchema), (req, res) => {
   try {
     const { name, job_id, hourly_rate, hours_worked, tip_mode, tip_input, notes } = req.validated;
-    const result = db.prepare('INSERT INTO templates (name, job_id, hourly_rate, hours_worked, tip_mode, tip_input, notes) VALUES (?,?,?,?,?,?,?)')
-      .run(name, job_id, hourly_rate, hours_worked, tip_mode, tip_input, notes);
+    const userId = req.user ? req.user.id : null;
+    const result = db.prepare('INSERT INTO templates (name, job_id, hourly_rate, hours_worked, tip_mode, tip_input, notes, user_id) VALUES (?,?,?,?,?,?,?,?)')
+      .run(name, job_id, hourly_rate, hours_worked, tip_mode, tip_input, notes, userId);
     res.json({ id: result.lastInsertRowid });
   } catch (e) {
     logger.error(e);
@@ -1228,6 +1549,11 @@ app.post('/api/templates', authMiddleware, validate(TemplateSchema), (req, res) 
 });
 
 app.delete('/api/templates/:id', authMiddleware, (req, res) => {
+  const tpl = db.prepare('SELECT * FROM templates WHERE id = ?').get(req.params.id);
+  if (!tpl) return res.status(404).json({ error: 'Template not found' });
+  if (tpl.user_id !== null && tpl.user_id !== req.user.id && !req.user.is_admin) {
+    return res.status(403).json({ error: 'Not your template' });
+  }
   db.prepare('DELETE FROM templates WHERE id = ?').run(req.params.id);
   res.json({ success: true });
 });
@@ -1235,15 +1561,21 @@ app.delete('/api/templates/:id', authMiddleware, (req, res) => {
 // ── Goals Routes ─────────────────────────────────────────────────────────────
 
 app.get('/api/goals', authMiddleware, (req, res) => {
-  res.json(db.prepare('SELECT * FROM goals ORDER BY created_at DESC').all());
+  if (!req.user) return res.json([]);
+  // Users see their own goals + global (user_id IS NULL) goals
+  const userId = req.user.id;
+  res.json(db.prepare(
+    'SELECT * FROM goals WHERE user_id IS NULL OR user_id = ? ORDER BY created_at DESC'
+  ).all(userId));
 });
 
 app.post('/api/goals', authMiddleware, validate(GoalSchema), (req, res) => {
   try {
     const { period, target_amount, active } = req.validated;
-    // Deactivate other goals of same period
-    if (active) db.prepare('UPDATE goals SET active = 0 WHERE period = ?').run(period);
-    const result = db.prepare('INSERT INTO goals (period, target_amount, active) VALUES (?,?,?)').run(period, target_amount, active ? 1 : 0);
+    const userId = req.user ? req.user.id : null;
+    // Deactivate other goals of same period for this user
+    if (active) db.prepare('UPDATE goals SET active = 0 WHERE period = ? AND user_id IS ?').run(period, userId);
+    const result = db.prepare('INSERT INTO goals (period, target_amount, active, user_id) VALUES (?,?,?,?)').run(period, target_amount, active ? 1 : 0, userId);
     res.json({ id: result.lastInsertRowid });
   } catch (e) {
     logger.error(e);
@@ -1253,8 +1585,14 @@ app.post('/api/goals', authMiddleware, validate(GoalSchema), (req, res) => {
 
 app.put('/api/goals/:id', authMiddleware, validate(GoalSchema), (req, res) => {
   try {
+    const goal = db.prepare('SELECT * FROM goals WHERE id = ?').get(req.params.id);
+    if (!goal) return res.status(404).json({ error: 'Goal not found' });
+    if (goal.user_id !== null && goal.user_id !== req.user.id && !req.user.is_admin) {
+      return res.status(403).json({ error: 'Not your goal' });
+    }
     const { period, target_amount, active } = req.validated;
-    if (active) db.prepare('UPDATE goals SET active = 0 WHERE period = ? AND id != ?').run(period, req.params.id);
+    const userId = goal.user_id;
+    if (active) db.prepare('UPDATE goals SET active = 0 WHERE period = ? AND id != ? AND user_id IS ?').run(period, req.params.id, userId);
     db.prepare('UPDATE goals SET period=?, target_amount=?, active=? WHERE id=?').run(period, target_amount, active ? 1 : 0, req.params.id);
     res.json({ success: true });
   } catch (e) {
@@ -1264,19 +1602,30 @@ app.put('/api/goals/:id', authMiddleware, validate(GoalSchema), (req, res) => {
 });
 
 app.delete('/api/goals/:id', authMiddleware, (req, res) => {
+  const goal = db.prepare('SELECT * FROM goals WHERE id = ?').get(req.params.id);
+  if (!goal) return res.status(404).json({ error: 'Goal not found' });
+  if (goal.user_id !== null && goal.user_id !== req.user.id && !req.user.is_admin) {
+    return res.status(403).json({ error: 'Not your goal' });
+  }
   db.prepare('DELETE FROM goals WHERE id = ?').run(req.params.id);
   res.json({ success: true });
 });
 
 app.get('/api/goals/history', authMiddleware, (req, res) => {
   try {
-    const activeGoals = db.prepare('SELECT * FROM goals WHERE active = 1').all();
+    const userId = req.user ? req.user.id : null;
+    const activeGoals = userId
+      ? db.prepare('SELECT * FROM goals WHERE active = 1 AND (user_id IS NULL OR user_id = ?)').all(userId)
+      : db.prepare('SELECT * FROM goals WHERE active = 1 AND user_id IS NULL').all();
     if (!activeGoals.length) return res.json([]);
 
     const filterUser = resolveUserFilter(req);
-    const hasUserFilter = filterUser !== null;
-    const shiftWhere = hasUserFilter ? 'deleted_at IS NULL AND user_id = ?' : 'deleted_at IS NULL';
-    const filterParams = hasUserFilter ? [filterUser] : [];
+    const userWhere = filterUser !== null
+      ? ` AND user_id IN (${filterUser.map(() => '?').join(',')})`
+      : '';
+    const filterParams = filterUser !== null ? filterUser : [];
+
+    const shiftWhere = `deleted_at IS NULL${userWhere}`;
 
     const startDay = getPayWeekStartDay();
     const now = new Date();
@@ -1360,7 +1709,7 @@ app.get('/api/summary', authMiddleware, (req, res) => {
       COALESCE(SUM(total_tips)/NULLIF(SUM(hours_worked),0),0) as avg_tips_per_hour
       FROM shifts WHERE date >= ? AND date <= ? AND deleted_at IS NULL`;
     const params = [from, to];
-    if (filterUser !== null) { q += ' AND user_id = ?'; params.push(filterUser); }
+    q = appendUserFilter(q, params, filterUser);
     return db.prepare(q).get(...params);
   };
 
@@ -1399,7 +1748,7 @@ app.get('/api/trends', authMiddleware, (req, res) => {
   const filterUser = resolveUserFilter(req);
   let trendWhere = 'date >= ? AND deleted_at IS NULL';
   const trendParams = [dateFilter];
-  if (filterUser !== null) { trendWhere += ' AND user_id = ?'; trendParams.push(filterUser); }
+  trendWhere = appendUserFilter(trendWhere, trendParams, filterUser);
 
   const data = db.prepare(`
     SELECT ${groupFmt} as period, COUNT(*) as shifts, SUM(hours_worked) as total_hours,
@@ -1419,7 +1768,7 @@ app.get('/api/analytics/effective-rate', authMiddleware, (req, res) => {
   const filterUser = resolveUserFilter(req);
   let where = 'deleted_at IS NULL AND hours_worked > 0';
   const params = [];
-  if (filterUser !== null) { where += ' AND user_id = ?'; params.push(filterUser); }
+  where = appendUserFilter(where, params, filterUser);
   const data = db.prepare(`
     SELECT CAST(strftime('%w', date) AS INTEGER) as dow,
       AVG((wage_total + total_tips) / NULLIF(hours_worked, 0)) as avg_effective_rate,
@@ -1435,7 +1784,7 @@ app.get('/api/analytics/extremes', authMiddleware, (req, res) => {
   const filterUser = resolveUserFilter(req);
   let where = 's.deleted_at IS NULL';
   const userParams = [];
-  if (filterUser !== null) { where += ' AND s.user_id = ?'; userParams.push(filterUser); }
+  where = appendUserFilter(where, userParams, filterUser, 's.user_id');
   const baseQuery = `SELECT s.*, u.display_name as user_name, j.name as job_name FROM shifts s LEFT JOIN users u ON s.user_id=u.id LEFT JOIN jobs j ON s.job_id=j.id WHERE ${where}`;
   const best = db.prepare(baseQuery + ' ORDER BY s.grand_total DESC LIMIT ?').all(...userParams, count);
   const worst = db.prepare(baseQuery + ' ORDER BY s.grand_total ASC LIMIT ?').all(...userParams, count);
@@ -1446,7 +1795,7 @@ app.get('/api/analytics/tip-ratio', authMiddleware, (req, res) => {
   const filterUser = resolveUserFilter(req);
   let where = 'deleted_at IS NULL';
   const params = [];
-  if (filterUser !== null) { where += ' AND user_id = ?'; params.push(filterUser); }
+  where = appendUserFilter(where, params, filterUser);
   const data = db.prepare(`
     SELECT strftime('%Y-%m', date) as period,
       SUM(total_tips) as total_tips, SUM(grand_total) as grand_total,
@@ -1467,7 +1816,7 @@ app.get('/api/overtime', authMiddleware, (req, res) => {
 
   let otWhere = 's.date >= ? AND s.date <= ? AND s.deleted_at IS NULL';
   const otParams = [fmt(weekStart), fmt(now)];
-  if (filterUser !== null) { otWhere += ' AND s.user_id = ?'; otParams.push(filterUser); }
+  otWhere = appendUserFilter(otWhere, otParams, filterUser, 's.user_id');
 
   const weekShifts = db.prepare(`
     SELECT s.*, j.name as job_name, j.overtime_threshold, j.overtime_multiplier
@@ -1509,7 +1858,7 @@ app.get('/api/tax-estimate', authMiddleware, (req, res) => {
   const filterUser = resolveUserFilter(req);
   let taxWhere = 'date >= ? AND date <= ? AND deleted_at IS NULL';
   const taxParams = [from, to];
-  if (filterUser !== null) { taxWhere += ' AND user_id = ?'; taxParams.push(filterUser); }
+  taxWhere = appendUserFilter(taxWhere, taxParams, filterUser);
 
   const data = db.prepare(`
     SELECT COALESCE(SUM(wage_total),0) as wages, COALESCE(SUM(total_tips),0) as tips, COALESCE(SUM(grand_total),0) as total
@@ -1537,7 +1886,7 @@ app.get('/api/export/csv', authMiddleware, (req, res) => {
   let query = 'SELECT s.*, j.name as job_name, u.display_name as user_name FROM shifts s LEFT JOIN jobs j ON s.job_id=j.id LEFT JOIN users u ON s.user_id=u.id WHERE s.deleted_at IS NULL';
   const params = [];
   if (from && to) { query += ' AND s.date >= ? AND s.date <= ?'; params.push(from, to); }
-  if (filterUser !== null) { query += ' AND s.user_id = ?'; params.push(filterUser); }
+  query = appendUserFilter(query, params, filterUser, 's.user_id');
   query += ' ORDER BY s.date ASC';
 
   const shifts = db.prepare(query).all(...params);
@@ -1610,7 +1959,7 @@ app.get('/api/export/pdf', authMiddleware, (req, res) => {
   let query = 'SELECT s.*, j.name as job_name, u.display_name as user_name FROM shifts s LEFT JOIN jobs j ON s.job_id=j.id LEFT JOIN users u ON s.user_id=u.id WHERE s.deleted_at IS NULL';
   const params = [];
   if (from && to) { query += ' AND s.date >= ? AND s.date <= ?'; params.push(from, to); }
-  if (filterUser !== null) { query += ' AND s.user_id = ?'; params.push(filterUser); }
+  query = appendUserFilter(query, params, filterUser, 's.user_id');
   query += ' ORDER BY s.date ASC';
 
   const shifts = db.prepare(query).all(...params);

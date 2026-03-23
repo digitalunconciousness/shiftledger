@@ -451,6 +451,13 @@ canvas{max-height:280px}
       <!-- My Profile -->
       <div class="card" style="margin-bottom:20px">
         <div class="card-label" style="margin-bottom:12px">My Profile</div>
+        <div id="profile-info" style="display:flex;align-items:center;gap:14px;margin-bottom:16px">
+          <div id="profile-avatar" style="width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:700;font-size:1rem;color:#0a0a0a"></div>
+          <div>
+            <div id="profile-username" style="font-family:var(--mono);font-size:.85rem;color:var(--text-dim)"></div>
+            <div id="profile-role" style="font-family:var(--mono);font-size:.72rem;margin-top:2px"></div>
+          </div>
+        </div>
         <div class="form-grid">
           <div class="form-group"><label>Display Name</label><input id="set-name"></div>
           <div class="form-group"><label>Color</label><input type="color" id="set-color" style="height:42px;padding:4px"></div>
@@ -458,8 +465,64 @@ canvas{max-height:280px}
           <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="saveProfile()">Save Profile</button></div>
         </div>
       </div>
-      <!-- Admin: Manage Users -->
+      <!-- Manage Jobs (all users) -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-label" style="margin-bottom:12px">My Jobs</div>
+        <div id="jobs-list"></div>
+        <div class="divider"></div>
+        <div class="form-grid">
+          <div class="form-group"><label>Job Name</label><input id="nj-name"></div>
+          <div class="form-group"><label>Default Rate</label><input type="number" id="nj-rate" step="0.25" min="0" placeholder="0.00"></div>
+          <div class="form-group"><label>Color</label><input type="color" id="nj-color" value="#f5a623" style="height:42px;padding:4px"></div>
+          <div class="form-group"><label>Tips Paid As</label><select id="nj-tip-payment" style="height:42px"><option value="cash">Cash (Nightly)</option><option value="paycheck">On Paycheck</option></select></div>
+          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addJob()">Add Job</button></div>
+        </div>
+      </div>
+      <!-- Goals (all users) -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-label" style="margin-bottom:12px">My Goals</div>
+        <div id="goals-list"></div>
+        <div class="divider"></div>
+        <div class="form-grid">
+          <div class="form-group"><label>Period</label><select id="ng-period"><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></div>
+          <div class="form-group"><label>Target ($)</label><input type="number" id="ng-amount" step="1" min="0" placeholder="500"></div>
+          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addGoal()">Add Goal</button></div>
+        </div>
+      </div>
+      <!-- Tax & Deduction Rates (all users) -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-label" style="margin-bottom:4px">Tax & Deduction Rates</div>
+        <p style="font-size:.75rem;color:var(--text-mute);margin-bottom:12px;font-family:var(--mono)">Customize your own tax rates. Global defaults are shown; save your own to override.</p>
+        <div id="tax-config-list"></div>
+        <div class="divider"></div>
+        <div class="card-label" style="margin-bottom:8px">Add Custom Deduction</div>
+        <div class="form-grid">
+          <div class="form-group"><label>Key</label><input id="ntc-key" placeholder="e.g. health_ins"></div>
+          <div class="form-group"><label>Label</label><input id="ntc-label" placeholder="e.g. Health Insurance"></div>
+          <div class="form-group"><label>Rate (%)</label><input type="number" id="ntc-rate" step="0.1" min="0" max="100" placeholder="0"></div>
+          <div class="form-group"><label>Flat ($/period)</label><input type="number" id="ntc-flat" step="1" min="0" placeholder="0"></div>
+          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addTaxConfig()">Add</button></div>
+        </div>
+      </div>
+      <!-- Household (all users) -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-label" style="margin-bottom:12px">Household</div>
+        <p style="font-size:.75rem;color:var(--text-mute);margin-bottom:12px;font-family:var(--mono)">Join or create a household to share shift data with family members (read-only access to each other's data).</p>
+        <div id="household-list"></div>
+        <div class="divider"></div>
+        <div class="form-grid">
+          <div class="form-group"><label>Create New Household</label><input id="hh-name" placeholder="e.g. Smith Family"></div>
+          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="createHousehold()">Create</button></div>
+        </div>
+        <div class="divider"></div>
+        <div class="form-grid">
+          <div class="form-group"><label>Join via Invite Code</label><input id="hh-invite" placeholder="Enter invite code"></div>
+          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="joinHousehold()">Join Household</button></div>
+        </div>
+      </div>
+      <!-- Admin Section -->
       <div id="admin-section" style="display:none">
+        <!-- Manage Users -->
         <div class="card" style="margin-bottom:20px">
           <div class="card-label" style="margin-bottom:12px">Manage Users (Admin)</div>
           <div id="users-list"></div>
@@ -472,33 +535,9 @@ canvas{max-height:280px}
             <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addUser()">Add User</button></div>
           </div>
         </div>
-        <!-- Manage Jobs -->
-        <div class="card" style="margin-bottom:20px">
-          <div class="card-label" style="margin-bottom:12px">Manage Jobs</div>
-          <div id="jobs-list"></div>
-          <div class="divider"></div>
-          <div class="form-grid">
-            <div class="form-group"><label>Job Name</label><input id="nj-name"></div>
-            <div class="form-group"><label>Default Rate</label><input type="number" id="nj-rate" step="0.25" min="0" placeholder="0.00"></div>
-            <div class="form-group"><label>Color</label><input type="color" id="nj-color" value="#f5a623" style="height:42px;padding:4px"></div>
-            <div class="form-group"><label>Tips Paid As</label><select id="nj-tip-payment" style="height:42px"><option value="cash">Cash (Nightly)</option><option value="paycheck">On Paycheck</option></select></div>
-            <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addJob()">Add Job</button></div>
-          </div>
-        </div>
-        <!-- Goals -->
-        <div class="card">
-          <div class="card-label" style="margin-bottom:12px">Goals</div>
-          <div id="goals-list"></div>
-          <div class="divider"></div>
-          <div class="form-grid">
-            <div class="form-group"><label>Period</label><select id="ng-period"><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></div>
-            <div class="form-group"><label>Target ($)</label><input type="number" id="ng-amount" step="1" min="0" placeholder="500"></div>
-            <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addGoal()">Add Goal</button></div>
-          </div>
-        </div>
         <!-- App Settings -->
         <div class="card" style="margin-bottom:20px">
-          <div class="card-label" style="margin-bottom:12px">App Settings</div>
+          <div class="card-label" style="margin-bottom:12px">App Settings (Admin)</div>
           <div class="form-grid">
             <div class="form-group">
               <label>Pay Week Starts On</label>
@@ -559,21 +598,6 @@ canvas{max-height:280px}
             <span id="tp-refresh-status" style="font-size:.68rem;color:var(--text-mute);font-family:var(--mono)"></span>
           </div>
           <div style="font-size:.68rem;color:var(--text-mute);font-family:var(--mono);margin-top:8px" id="tp-meta-line"></div>
-        </div>
-        <!-- Tax & Deduction Rates -->
-        <div class="card" style="margin-bottom:20px">
-          <div class="card-label" style="margin-bottom:12px">Tax & Deduction Rates</div>
-          <p style="font-size:.75rem;color:var(--text-mute);margin-bottom:12px;font-family:var(--mono)">These estimates are for budgeting only — not tax advice.</p>
-          <div id="tax-config-list"></div>
-          <div class="divider"></div>
-          <div class="card-label" style="margin-bottom:8px">Add Custom Deduction</div>
-          <div class="form-grid">
-            <div class="form-group"><label>Key</label><input id="ntc-key" placeholder="e.g. health_ins"></div>
-            <div class="form-group"><label>Label</label><input id="ntc-label" placeholder="e.g. Health Insurance"></div>
-            <div class="form-group"><label>Rate (%)</label><input type="number" id="ntc-rate" step="0.1" min="0" max="100" placeholder="0"></div>
-            <div class="form-group"><label>Flat ($/period)</label><input type="number" id="ntc-flat" step="1" min="0" placeholder="0"></div>
-            <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addTaxConfig()">Add</button></div>
-          </div>
         </div>
       </div>
     </div>
@@ -1103,15 +1127,25 @@ async function loadAppSettings(){
 }
 
 async function loadSettings(){
+  // Profile section (all users)
   $('set-name').value=currentUser.display_name;$('set-color').value=currentUser.color;
+  const roleEl=$('profile-role');
+  if(roleEl) roleEl.textContent=currentUser.is_admin?'Administrator':'Member';
+  const avatarEl=$('profile-avatar');
+  if(avatarEl){avatarEl.style.background=currentUser.color;avatarEl.textContent=(currentUser.display_name||'?')[0].toUpperCase();}
+  const usernameEl=$('profile-username');
+  if(usernameEl) usernameEl.textContent='@'+currentUser.username;
+
+  // Load jobs, goals, tax config for all users
+  loadJobsList();loadGoalsList();loadTaxConfig();loadHouseholds();
+
   if(currentUser.is_admin){
-    loadUsersList();loadJobsList();loadGoalsList();
+    loadUsersList();
     const s=await loadAppSettings();
     $('set-week-start').value=s.pay_week_start_day||'1';
     $('set-pay-period').value=s.pay_period_type||'weekly';
     $('set-anchor').value=s.pay_period_anchor||'';
     toggleAnchor();
-    loadTaxConfig();
     loadTaxProfiles();
   }
 }
@@ -1320,13 +1354,15 @@ async function deleteUser(id){
 
 async function loadJobsList(){
   const jobs=await fetch('/api/jobs').then(r=>r.json());
-  $('jobs-list').innerHTML=jobs.map(j=>`
-    <div class="user-card"><span class="user-dot" style="background:${j.color}"></span>
-    <div class="user-info"><strong>${esc(j.name)}</strong><small>$${j.default_rate.toFixed(2)}/hr · OT ${j.overtime_threshold||40}h @ ${j.overtime_multiplier||1.5}x · Tips: ${j.tip_payment==='paycheck'?'Paycheck':'Cash'}${j.archived?' · Archived':''}</small></div>
+  $('jobs-list').innerHTML=jobs.map(j=>{
+    const isOwner=!j.user_id||j.user_id===currentUser.id||currentUser.is_admin;
+    const ownerLabel=j.user_id===null?'<span style="font-size:.65rem;color:var(--amber);font-family:var(--mono);margin-left:4px">global</span>':'';
+    return `<div class="user-card"><span class="user-dot" style="background:${j.color}"></span>
+    <div class="user-info"><strong>${esc(j.name)}</strong>${ownerLabel}<small>$${j.default_rate.toFixed(2)}/hr · OT ${j.overtime_threshold||40}h @ ${j.overtime_multiplier||1.5}x · Tips: ${j.tip_payment==='paycheck'?'Paycheck':'Cash'}${j.archived?' · Archived':''}</small></div>
     <div style="display:flex;gap:6px">
-      ${!j.archived?`<button class="btn btn-ghost btn-sm" onclick="editJob(${j.id})">Edit</button><button class="btn btn-danger btn-sm" onclick="deleteJob(${j.id},'${j.name.replace(/'/g,"\\'")}')">Delete</button>`:'<small style="opacity:.5">Archived</small>'}
-    </div></div>
-  `).join('');
+      ${!j.archived&&isOwner?`<button class="btn btn-ghost btn-sm" onclick="editJob(${j.id})">Edit</button><button class="btn btn-danger btn-sm" onclick="deleteJob(${j.id},'${j.name.replace(/'/g,"\\'")}')">Delete</button>`:'<small style="opacity:.5">'+(j.archived?'Archived':'Read-only')+'</small>'}
+    </div></div>`;
+  }).join('');
 }
 
 async function addJob(){
@@ -1368,10 +1404,12 @@ async function deleteJob(id,name){
 
 async function loadGoalsList(){
   const goals=await fetch('/api/goals').then(r=>r.json());
-  $('goals-list').innerHTML=goals.map(g=>`
-    <div class="user-card"><div class="user-info"><strong>${g.period} — $${g.target_amount.toFixed(0)}</strong><small>${g.active?'Active':'Inactive'}</small></div>
-    <button class="btn btn-danger" onclick="deleteGoal(${g.id})">Delete</button></div>
-  `).join('')||'<p class="empty">No goals set.</p>';
+  $('goals-list').innerHTML=goals.map(g=>{
+    const isOwner=!g.user_id||g.user_id===currentUser.id||currentUser.is_admin;
+    return `<div class="user-card"><div class="user-info"><strong>${g.period} — $${g.target_amount.toFixed(0)}</strong><small>${g.active?'Active':'Inactive'}</small></div>
+    ${isOwner?`<button class="btn btn-danger" onclick="deleteGoal(${g.id})">Delete</button>`:'<small style="opacity:.5">Read-only</small>'}
+    </div>`;
+  }).join('')||'<p class="empty">No goals set.</p>';
 }
 
 async function addGoal(){
@@ -1383,6 +1421,57 @@ async function addGoal(){
 
 async function deleteGoal(id){
   await fetch('/api/goals/'+id,{method:'DELETE'});toast('Goal deleted','success');loadGoalsList();
+}
+
+// ── Households ──
+async function loadHouseholds(){
+  const households=await fetch('/api/households').then(r=>r.json());
+  const el=$('household-list');
+  if(!el)return;
+  if(!households.length){el.innerHTML='<p class="empty" style="margin-bottom:8px">No households yet. Create one or join with an invite code.</p>';return;}
+  el.innerHTML=households.map(h=>`
+    <div class="user-card" style="margin-bottom:10px">
+      <div class="user-info" style="flex:1">
+        <strong>${esc(h.name)}</strong>
+        <small>${h.member_count} member${h.member_count!==1?'s':''}</small>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <span style="font-family:var(--mono);font-size:.7rem;color:var(--text-dim);background:var(--surface2);padding:3px 8px;border-radius:4px" title="Share this code with family members">Code: ${esc(h.invite_code)}</span>
+        <button class="btn btn-ghost btn-sm" onclick="showHouseholdMembers(${h.id},'${esc(h.name)}')">Members</button>
+        <button class="btn btn-danger btn-sm" onclick="leaveHousehold(${h.id},'${esc(h.name)}')">Leave</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function createHousehold(){
+  const name=gv('hh-name');
+  if(!name){toast('Enter a household name','error');return}
+  const res=await fetch('/api/households',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
+  if(!res.ok){const d=await res.json();toast(d.error||'Failed to create household','error');return}
+  sv('hh-name','');toast('Household created!','success');loadHouseholds();
+}
+
+async function joinHousehold(){
+  const invite_code=gv('hh-invite');
+  if(!invite_code){toast('Enter an invite code','error');return}
+  const res=await fetch('/api/households/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({invite_code})});
+  const d=await res.json();
+  if(!res.ok){toast(d.error||'Failed to join household','error');return}
+  sv('hh-invite','');toast('Joined household: '+d.household.name,'success');loadHouseholds();
+}
+
+async function leaveHousehold(id,name){
+  if(!confirm('Leave "'+name+'"? You will no longer see shared data from this household.'))return;
+  const res=await fetch('/api/households/'+id+'/leave',{method:'DELETE'});
+  if(!res.ok){const d=await res.json();toast(d.error||'Failed to leave','error');return}
+  toast('Left household','success');loadHouseholds();
+}
+
+async function showHouseholdMembers(id,name){
+  const members=await fetch('/api/households/'+id+'/members').then(r=>r.json());
+  const list=members.map(m=>`• ${m.display_name} (@${m.username})`).join('\n');
+  alert('Members of "'+name+'":\n\n'+list);
 }
 
 // ── Toast ──
