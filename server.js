@@ -20,6 +20,8 @@ const PORT = process.env.PORT || 3000;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'shifts.db');
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 const SESSION_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 days
+const DEFAULT_AUDIT_LOG_LIMIT = 50;
+const MAX_AUDIT_LOG_LIMIT = 200;
 
 // ── Database Init ────────────────────────────────────────────────────────────
 const db = new Database(DB_PATH);
@@ -164,6 +166,23 @@ function migrate() {
         db.exec("ALTER TABLE jobs ADD COLUMN tip_payment TEXT NOT NULL DEFAULT 'cash'");
       }
     },
+    // v7: email column on users + audit_log table
+    () => {
+      const cols = db.prepare('PRAGMA table_info(users)').all().map(c => c.name);
+      if (!cols.includes('email')) {
+        db.exec("ALTER TABLE users ADD COLUMN email TEXT DEFAULT NULL");
+      }
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS audit_log (
+          id         INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          actor_id   INTEGER NOT NULL REFERENCES users(id),
+          action     TEXT    NOT NULL,
+          details    TEXT    NOT NULL DEFAULT '{}',
+          created_at TEXT    DEFAULT (datetime('now'))
+        )
+      `);
+    },
   ];
 
   const tx = db.transaction(() => {
@@ -298,6 +317,8 @@ function createRateLimiter(windowMs, maxRequests) {
 
 // Rate limiters for sensitive auth endpoints
 const authRateLimit = createRateLimiter(15 * 60 * 1000, 20); // 20 requests per 15 min
+// Rate limiter for user profile/management endpoints
+const profileRateLimit = createRateLimiter(15 * 60 * 1000, 60); // 60 requests per 15 min
 
 // Auth middleware
 function authMiddleware(req, res, next) {
@@ -383,6 +404,14 @@ const RegisterSchema = z.object({
   password: z.string().min(4).max(200),
   display_name: z.string().min(1).max(100),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+});
+
+const UpdateProfileSchema = z.object({
+  display_name: z.string().min(1).max(100).optional(),
+  email: z.string().email().max(255).optional().nullable(),
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+  password: z.string().min(4).max(200).optional(),
+  is_admin: z.boolean().optional(),
 });
 
 const LoginSchema = z.object({
@@ -582,33 +611,89 @@ app.post('/api/auth/refresh', authRateLimit, (req, res) => {
 
 // ── User Management Routes ───────────────────────────────────────────────────
 
-app.get('/api/users', authMiddleware, (req, res) => {
-  const users = db.prepare('SELECT id, username, display_name, is_admin, color, created_at FROM users').all();
-  res.json(users);
+// GET /api/profile — current user's own profile
+app.get('/api/profile', authMiddleware, profileRateLimit, (req, res) => {
+  const user = db.prepare('SELECT id, username, display_name, email, is_admin, color, created_at FROM users WHERE id = ?').get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  res.json({ ...user, is_admin: !!user.is_admin, household: null });
 });
 
-app.put('/api/users/:id', authMiddleware, async (req, res) => {
+// GET /api/users — admin-only list of all users
+app.get('/api/users', authMiddleware, adminOnly, profileRateLimit, (req, res) => {
+  const users = db.prepare('SELECT id, username, display_name, email, is_admin, color, created_at FROM users').all();
+  res.json(users.map(u => ({ ...u, is_admin: !!u.is_admin })));
+});
+
+// GET /api/users/:id — own profile or admin access
+app.get('/api/users/:id', authMiddleware, profileRateLimit, (req, res) => {
+  const targetId = parseInt(req.params.id, 10);
+  const isOwnProfile = req.user && req.user.id === targetId;
+  const isAdmin = req.user && req.user.is_admin;
+  if (!isOwnProfile && !isAdmin) return res.status(403).json({ error: 'Forbidden' });
+  const user = db.prepare('SELECT id, username, display_name, email, is_admin, color, created_at FROM users WHERE id = ?').get(targetId);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  res.json({ ...user, is_admin: !!user.is_admin, household: null });
+});
+
+app.put('/api/users/:id', authMiddleware, profileRateLimit, validate(UpdateProfileSchema), async (req, res) => {
   try {
     const targetId = parseInt(req.params.id, 10);
     const isOwnProfile = req.user && req.user.id === targetId;
     const isAdmin = req.user && req.user.is_admin;
     if (!isOwnProfile && !isAdmin) return res.status(403).json({ error: 'Forbidden' });
 
-    const { display_name, color, password, is_admin } = req.body;
-    if (display_name) db.prepare('UPDATE users SET display_name = ? WHERE id = ?').run(display_name, targetId);
-    if (color) db.prepare('UPDATE users SET color = ? WHERE id = ?').run(color, targetId);
-    if (password) {
+    const { display_name, email, color, password, is_admin } = req.validated;
+    const changes = [];
+
+    if (display_name !== undefined) {
+      db.prepare('UPDATE users SET display_name = ? WHERE id = ?').run(display_name, targetId);
+      changes.push('display_name');
+    }
+    if (email !== undefined) {
+      db.prepare('UPDATE users SET email = ? WHERE id = ?').run(email, targetId);
+      changes.push('email');
+    }
+    if (color !== undefined) {
+      db.prepare('UPDATE users SET color = ? WHERE id = ?').run(color, targetId);
+      changes.push('color');
+    }
+    if (password !== undefined) {
       const pw = await hashPassword(password);
       db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(pw, targetId);
+      changes.push('password');
     }
     if (isAdmin && is_admin !== undefined) {
       db.prepare('UPDATE users SET is_admin = ? WHERE id = ?').run(is_admin ? 1 : 0, targetId);
+      changes.push('is_admin');
     }
-    res.json({ success: true });
+
+    if (changes.length > 0) {
+      db.prepare(`INSERT INTO audit_log (user_id, actor_id, action, details) VALUES (?,?,?,?)`)
+        .run(targetId, req.user.id, 'profile_update', JSON.stringify({ fields: changes }));
+    }
+
+    const updated = db.prepare('SELECT id, username, display_name, email, is_admin, color, created_at FROM users WHERE id = ?').get(targetId);
+    res.json({ success: true, user: { ...updated, is_admin: !!updated.is_admin } });
   } catch (e) {
     logger.error(e);
     res.status(500).json({ error: e.message });
   }
+});
+
+// GET /api/audit-log — admin-only audit log view
+app.get('/api/audit-log', authMiddleware, adminOnly, profileRateLimit, (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit, 10) || DEFAULT_AUDIT_LOG_LIMIT, MAX_AUDIT_LOG_LIMIT);
+  const rows = db.prepare(`
+    SELECT al.id, al.action, al.details, al.created_at,
+           u.username AS target_username, u.display_name AS target_display_name,
+           a.username AS actor_username, a.display_name AS actor_display_name
+    FROM audit_log al
+    JOIN users u ON al.user_id = u.id
+    JOIN users a ON al.actor_id = a.id
+    ORDER BY al.created_at DESC
+    LIMIT ?
+  `).all(limit);
+  res.json(rows.map(r => ({ ...r, details: JSON.parse(r.details) })));
 });
 
 app.delete('/api/users/:id', authMiddleware, adminOnly, (req, res) => {
