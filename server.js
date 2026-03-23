@@ -16,6 +16,7 @@ const logger = pino({
 });
 
 const app = express();
+app.disable('x-powered-by');
 const PORT = process.env.PORT || 3000;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'shifts.db');
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
@@ -192,7 +193,31 @@ function resolveUserFilter(req) {
 }
 
 // ── Middleware ────────────────────────────────────────────────────────────────
-app.use(express.json());
+app.use(express.json({ limit: '100kb' }));
+
+// Security headers
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  // X-Frame-Options kept for older browser compatibility; frame-ancestors 'none' in CSP takes precedence in modern browsers
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '0');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader(
+    'Content-Security-Policy',
+    // unsafe-inline is required because index.html uses inline <script> and <style> blocks.
+    // A future refactor to external files + nonces would allow removing these directives.
+    "default-src 'self'; " +
+    "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; " +
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+    "font-src 'self' https://fonts.gstatic.com; " +
+    "img-src 'self' data:; " +
+    "connect-src 'self'; " +
+    "frame-ancestors 'none';"
+  );
+  next();
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Request logging
@@ -298,6 +323,15 @@ function createRateLimiter(windowMs, maxRequests) {
 
 // Rate limiters for sensitive auth endpoints
 const authRateLimit = createRateLimiter(15 * 60 * 1000, 20); // 20 requests per 15 min
+// General API rate limiter
+const apiRateLimit = createRateLimiter(60 * 1000, 120); // 120 requests per minute per IP
+
+// Safe error response — never leak internal error details in production
+function internalError(res, err) {
+  logger.error(err);
+  const msg = process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message;
+  res.status(500).json({ error: msg });
+}
 
 // Auth middleware
 function authMiddleware(req, res, next) {
@@ -437,6 +471,14 @@ function getPeriodBounds() {
 
 // ── Auth Routes ──────────────────────────────────────────────────────────────
 
+// Apply general rate limit to all API routes
+app.use('/api', apiRateLimit);
+
+// GET /api/health — simple liveness check (no auth required)
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', uptime: process.uptime() });
+});
+
 // GET /api/auth/status — check if setup needed or logged in
 app.get('/api/auth/status', (req, res) => {
   const userCount = getUserCount();
@@ -473,8 +515,7 @@ app.post('/api/auth/setup', authRateLimit, validate(RegisterSchema), async (req,
     res.setHeader('Set-Cookie', `sl_session=${signCookie(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_AGE / 1000}`);
     res.json({ success: true, token, user: { id: result.lastInsertRowid, username, display_name, is_admin: true, color: assignedColor } });
   } catch (e) {
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -492,8 +533,7 @@ app.post('/api/auth/login', authRateLimit, validate(LoginSchema), async (req, re
     res.setHeader('Set-Cookie', `sl_session=${signCookie(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_AGE / 1000}`);
     res.json({ success: true, token, user: { id: user.id, username: user.username, display_name: user.display_name, is_admin: !!user.is_admin, color: user.color } });
   } catch (e) {
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -525,8 +565,7 @@ app.post('/api/auth/register', authMiddleware, adminOnly, validate(RegisterSchem
     res.json({ success: true, user: { id: result.lastInsertRowid, username, display_name, is_admin: false, color: assignedColor } });
   } catch (e) {
     if (e.message.includes('UNIQUE')) return res.status(409).json({ error: 'Username already taken' });
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -547,8 +586,7 @@ app.post('/api/auth/signup', authRateLimit, validate(RegisterSchema), async (req
     res.status(201).json({ success: true, token, user: { id: result.lastInsertRowid, username, display_name, is_admin: false, color: assignedColor } });
   } catch (e) {
     if (e.message.includes('UNIQUE')) return res.status(409).json({ error: 'Username already taken' });
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -606,8 +644,7 @@ app.put('/api/users/:id', authMiddleware, async (req, res) => {
     }
     res.json({ success: true });
   } catch (e) {
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -636,8 +673,7 @@ app.post('/api/shifts', authMiddleware, validate(ShiftSchema), (req, res) => {
 
     res.json({ id: result.lastInsertRowid, total_tips, wage_total, grand_total });
   } catch (e) {
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -675,8 +711,7 @@ app.put('/api/shifts/:id', authMiddleware, validate(ShiftSchema), (req, res) => 
 
     res.json({ success: true, total_tips, wage_total, grand_total });
   } catch (e) {
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -710,8 +745,7 @@ app.post('/api/jobs', authMiddleware, validate(JobSchema), (req, res) => {
       .run(name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment);
     res.json({ id: result.lastInsertRowid, name, default_rate, color, tip_payment });
   } catch (e) {
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -722,8 +756,7 @@ app.put('/api/jobs/:id', authMiddleware, validate(JobSchema), (req, res) => {
       .run(name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, req.params.id);
     res.json({ success: true });
   } catch (e) {
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -762,8 +795,7 @@ app.put('/api/settings', authMiddleware, adminOnly, (req, res) => {
     }
     res.json({ success: true });
   } catch (e) {
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -978,8 +1010,7 @@ app.post('/api/tax-profiles/refresh', authMiddleware, adminOnly, (req, res) => {
     const result = autoRefreshTaxRates(true);
     res.json({ success: true, ...result, meta: getTaxProfilesMeta() });
   } catch (e) {
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -1016,7 +1047,7 @@ app.put('/api/tax-config/:id', authMiddleware, adminOnly, (req, res) => {
     db.prepare('UPDATE tax_config SET label=?, rate=?, flat_amount=?, enabled=? WHERE id=?')
       .run(label ?? row.label, rate ?? row.rate, flat_amount ?? row.flat_amount, enabled !== undefined ? (enabled ? 1 : 0) : row.enabled, id);
     res.json({ success: true });
-  } catch (e) { logger.error(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { internalError(res, e); }
 });
 
 app.post('/api/tax-config', authMiddleware, adminOnly, (req, res) => {
@@ -1029,7 +1060,7 @@ app.post('/api/tax-config', authMiddleware, adminOnly, (req, res) => {
     res.json({ id: result.lastInsertRowid });
   } catch (e) {
     if (e.message.includes('UNIQUE')) return res.status(409).json({ error: 'Key already exists' });
-    logger.error(e); res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -1204,8 +1235,7 @@ app.get('/api/paycheck-estimate', authMiddleware, (req, res) => {
       projected_cash_tips: projectedCashTips,
     });
   } catch (e) {
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -1222,8 +1252,7 @@ app.post('/api/templates', authMiddleware, validate(TemplateSchema), (req, res) 
       .run(name, job_id, hourly_rate, hours_worked, tip_mode, tip_input, notes);
     res.json({ id: result.lastInsertRowid });
   } catch (e) {
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -1246,8 +1275,7 @@ app.post('/api/goals', authMiddleware, validate(GoalSchema), (req, res) => {
     const result = db.prepare('INSERT INTO goals (period, target_amount, active) VALUES (?,?,?)').run(period, target_amount, active ? 1 : 0);
     res.json({ id: result.lastInsertRowid });
   } catch (e) {
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -1258,8 +1286,7 @@ app.put('/api/goals/:id', authMiddleware, validate(GoalSchema), (req, res) => {
     db.prepare('UPDATE goals SET period=?, target_amount=?, active=? WHERE id=?').run(period, target_amount, active ? 1 : 0, req.params.id);
     res.json({ success: true });
   } catch (e) {
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -1342,8 +1369,7 @@ app.get('/api/goals/history', authMiddleware, (req, res) => {
 
     res.json(results);
   } catch (e) {
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -1597,8 +1623,7 @@ app.post('/api/import/csv', authMiddleware, express.text({ type: '*/*', limit: '
 
     res.json({ imported, errors });
   } catch (e) {
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -1716,6 +1741,14 @@ app.get('/api/export/pdf', authMiddleware, (req, res) => {
   doc.fontSize(8).font('Helvetica').fillColor('#aaa')
     .text(`Generated by ShiftLedger · ${new Date().toLocaleString()}`, 50, 740, { align: 'center', width: 512 });
   doc.end();
+});
+
+// ── Global Error Handler ──────────────────────────────────────────────────────
+// Catches any unhandled errors thrown synchronously in route handlers.
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, _next) => {
+  if (res.headersSent) return _next(err);
+  internalError(res, err);
 });
 
 // ── Start ────────────────────────────────────────────────────────────────────
