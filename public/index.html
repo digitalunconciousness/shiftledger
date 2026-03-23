@@ -454,8 +454,17 @@ canvas{max-height:280px}
         <div class="form-grid">
           <div class="form-group"><label>Display Name</label><input id="set-name"></div>
           <div class="form-group"><label>Color</label><input type="color" id="set-color" style="height:42px;padding:4px"></div>
-          <div class="form-group"><label>New Password</label><input type="password" id="set-pass" placeholder="Leave blank to keep current"></div>
           <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="saveProfile()">Save Profile</button></div>
+        </div>
+      </div>
+      <!-- Change Password -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-label" style="margin-bottom:12px">Change Password</div>
+        <div class="form-grid">
+          <div class="form-group"><label>Current Password</label><input type="password" id="pw-current" autocomplete="current-password"></div>
+          <div class="form-group"><label>New Password</label><input type="password" id="pw-new" placeholder="8+ chars, letter + number/symbol" autocomplete="new-password"></div>
+          <div class="form-group"><label>Confirm New Password</label><input type="password" id="pw-confirm" autocomplete="new-password"></div>
+          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="changePassword()">Change Password</button></div>
         </div>
       </div>
       <!-- Admin: Manage Users -->
@@ -472,7 +481,6 @@ canvas{max-height:280px}
             <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addUser()">Add User</button></div>
           </div>
         </div>
-        <!-- Manage Jobs -->
         <div class="card" style="margin-bottom:20px">
           <div class="card-label" style="margin-bottom:12px">Manage Jobs</div>
           <div id="jobs-list"></div>
@@ -575,10 +583,30 @@ canvas{max-height:280px}
             <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addTaxConfig()">Add</button></div>
           </div>
         </div>
+        <!-- Audit Log -->
+        <div class="card" style="margin-bottom:20px">
+          <div class="card-label" style="margin-bottom:12px">Admin Audit Log</div>
+          <div id="audit-log-list" style="font-family:var(--mono);font-size:.78rem;color:var(--text-dim)">Loading…</div>
+        </div>
       </div>
     </div>
 
   </main>
+</div>
+
+<!-- Reset Password Modal -->
+<div class="modal-overlay" id="reset-pw-modal" role="dialog" aria-modal="true" aria-labelledby="reset-pw-modal-title">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title" id="reset-pw-modal-title">Reset Password</span><button class="close-btn" onclick="closeResetPwModal()" aria-label="Close reset password dialog"><span aria-hidden="true">×</span></button></div>
+    <input type="hidden" id="reset-pw-user-id">
+    <p id="reset-pw-user-label" style="font-family:var(--mono);font-size:.85rem;color:var(--text-dim);margin-bottom:16px"></p>
+    <div class="form-grid">
+      <div class="form-group"><label>New Password</label><input type="password" id="reset-pw-new" placeholder="8+ chars, letter + number/symbol" autocomplete="new-password"></div>
+      <div class="form-group"><label>Confirm Password</label><input type="password" id="reset-pw-confirm" autocomplete="new-password"></div>
+    </div>
+    <div class="divider"></div>
+    <div style="display:flex;gap:10px"><button class="btn btn-primary" onclick="submitAdminResetPw()">Reset Password</button><button class="btn btn-ghost" onclick="closeResetPwModal()">Cancel</button></div>
+  </div>
 </div>
 
 <!-- Edit Modal -->
@@ -1105,7 +1133,7 @@ async function loadAppSettings(){
 async function loadSettings(){
   $('set-name').value=currentUser.display_name;$('set-color').value=currentUser.color;
   if(currentUser.is_admin){
-    loadUsersList();loadJobsList();loadGoalsList();
+    loadUsersList();loadJobsList();loadGoalsList();loadAuditLog();
     const s=await loadAppSettings();
     $('set-week-start').value=s.pay_week_start_day||'1';
     $('set-pay-period').value=s.pay_period_type||'weekly';
@@ -1279,13 +1307,33 @@ function renderPaycheckCard(p){
     </div>`;
 }
 
+function validatePasswordFields(pw,confirm){
+  if(!pw||!confirm){toast('Fill all password fields','error');return false}
+  if(pw!==confirm){toast('Passwords do not match','error');return false}
+  if(pw.length<8){toast('Password must be at least 8 characters','error');return false}
+  return true;
+}
+
 async function saveProfile(){
   const body={display_name:gv('set-name'),color:gv('set-color')};
-  const pass=gv('set-pass');if(pass)body.password=pass;
-  await fetch('/api/users/'+currentUser.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const res=await fetch('/api/users/'+currentUser.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const data=await res.json();
+  if(!res.ok){toast(data.error||'Failed to save profile','error');return}
   currentUser.display_name=body.display_name;currentUser.color=body.color;
   $('topbar-user').innerHTML=`<span class="user-dot" style="background:${currentUser.color}"></span>${esc(currentUser.display_name)}`;
-  sv('set-pass','');toast('Profile saved','success');
+  toast('Profile saved','success');
+}
+
+async function changePassword(){
+  const current=gv('pw-current'),np=gv('pw-new'),confirm=gv('pw-confirm');
+  if(!current){toast('Enter your current password','error');return}
+  if(!validatePasswordFields(np,confirm))return;
+  const res=await fetch('/api/auth/change-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({current_password:current,new_password:np})});
+  const data=await res.json();
+  if(!res.ok){toast(data.error||'Password change failed','error');return}
+  sv('pw-current','');sv('pw-new','');sv('pw-confirm','');
+  toast('Password changed — please log in again','success');
+  setTimeout(()=>window.location.reload(),1500);
 }
 
 async function loadUsersList(){
@@ -1294,9 +1342,41 @@ async function loadUsersList(){
     <div class="user-card">
       <span class="user-dot" style="background:${u.color}"></span>
       <div class="user-info"><strong>${esc(u.display_name)}</strong><small>@${esc(u.username)} ${u.is_admin?'· Admin':''}</small></div>
-      ${u.id!==currentUser.id?`<button class="btn btn-ghost btn-sm" onclick="toggleAdmin(${u.id},${u.is_admin?0:1})">${u.is_admin?'Demote':'Promote'}</button><button class="btn btn-danger" onclick="deleteUser(${u.id})">Delete</button>`:'<span style="font-family:var(--mono);font-size:.7rem;color:var(--text-mute)">You</span>'}
+      ${u.id!==currentUser.id?`<div style="display:flex;gap:6px"><button class="btn btn-ghost btn-sm" onclick="toggleAdmin(${u.id},${u.is_admin?0:1})">${u.is_admin?'Demote':'Promote'}</button><button class="btn btn-ghost btn-sm" onclick="openResetPwModal(${u.id},'${esc(u.username)}')">Reset PW</button><button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id})">Delete</button></div>`:'<span style="font-family:var(--mono);font-size:.7rem;color:var(--text-mute)">You</span>'}
     </div>
   `).join('');
+}
+
+function openResetPwModal(id,username){
+  $('reset-pw-user-id').value=id;
+  $('reset-pw-user-label').textContent='Resetting password for: @'+username;
+  $('reset-pw-new').value='';$('reset-pw-confirm').value='';
+  $('reset-pw-modal').classList.add('open');
+}
+
+function closeResetPwModal(){
+  $('reset-pw-modal').classList.remove('open');
+}
+
+async function submitAdminResetPw(){
+  const id=parseInt($('reset-pw-user-id').value,10);
+  const np=gv('reset-pw-new'),confirm=gv('reset-pw-confirm');
+  if(!validatePasswordFields(np,confirm))return;
+  const res=await fetch('/api/users/'+id+'/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({new_password:np})});
+  const data=await res.json();
+  if(!res.ok){toast(data.error||'Reset failed','error');return}
+  closeResetPwModal();
+  toast(data.message||'Password reset successfully','success');
+  loadAuditLog();
+}
+
+async function loadAuditLog(){
+  const el=$('audit-log-list');if(!el)return;
+  try{
+    const rows=await fetch('/api/audit-log').then(r=>r.json());
+    if(!rows.length){el.textContent='No admin actions recorded yet.';return}
+    el.innerHTML=rows.map(r=>`<div style="padding:6px 0;border-bottom:1px solid var(--border)"><span style="color:var(--amber)">${esc(r.actor_username)}</span> → <span style="color:var(--green)">${esc(r.target_username)}</span>: ${esc(r.detail)} <span style="color:var(--text-mute);float:right">${r.created_at.replace('T',' ').substring(0,16)}</span></div>`).join('');
+  }catch(e){el.textContent='Could not load audit log.';}
 }
 
 async function addUser(){
