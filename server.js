@@ -206,6 +206,10 @@ function migrate() {
     },
     // v9: fix tax_config UNIQUE constraint to allow per-user rows (key+user_id unique)
     () => {
+      const taxCols = db.prepare('PRAGMA table_info(tax_config)').all().map(c => c.name);
+      if (!taxCols.includes('user_id')) {
+        db.exec('ALTER TABLE tax_config ADD COLUMN user_id INTEGER REFERENCES users(id)');
+      }
       // Recreate tax_config with composite unique constraint
       db.exec(`
         CREATE TABLE IF NOT EXISTS tax_config_new (
@@ -225,6 +229,22 @@ function migrate() {
                SELECT id, key, label, rate, flat_amount, enabled, sort_order, user_id FROM tax_config`);
       db.exec('DROP TABLE tax_config');
       db.exec('ALTER TABLE tax_config_new RENAME TO tax_config');
+    },
+    // v10: repair missing user_id columns on older user-scoped tables
+    () => {
+      const tableFixes = [
+        ['jobs', 'ALTER TABLE jobs ADD COLUMN user_id INTEGER REFERENCES users(id)'],
+        ['templates', 'ALTER TABLE templates ADD COLUMN user_id INTEGER REFERENCES users(id)'],
+        ['goals', 'ALTER TABLE goals ADD COLUMN user_id INTEGER REFERENCES users(id)'],
+        ['tax_config', 'ALTER TABLE tax_config ADD COLUMN user_id INTEGER REFERENCES users(id)'],
+      ];
+
+      for (const [tableName, alterSql] of tableFixes) {
+        const cols = db.prepare(`PRAGMA table_info(${tableName})`).all().map(c => c.name);
+        if (!cols.includes('user_id')) {
+          db.exec(alterSql);
+        }
+      }
     },
   ];
 
