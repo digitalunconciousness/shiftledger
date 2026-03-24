@@ -941,6 +941,10 @@ function formatTruncatedMoney(value){
   return '$'+truncateToTwoDec(value).toFixed(2);
 }
 
+function formatRoundedDollar(value){
+  return '$'+roundWholeDollar(value);
+}
+
 function openTipCalcModal(){
   resetTipCalculator();
   $('tip-calc-modal').classList.add('open');
@@ -1001,12 +1005,10 @@ function calculateTipouts(totalTips,employees){
     tipPerHour,
     tipout:roundWholeDollar(truncateToTwoDec(employee.hours*tipPerHour))
   }));
-  const totalTipouts=truncateToTwoDec(calculatedEmployees.reduce((sum,e)=>sum+e.tipout,0));
   return{
     employees:calculatedEmployees,
     tipPerHour,
     totalHours,
-    totalTipouts,
     totalTipsRounded:roundWholeDollar(totalTips)
   };
 }
@@ -1017,7 +1019,7 @@ function renderTipCalculatorResult(result){
       <td>${esc(emp.name)}</td>
       <td>${formatFixed(emp.hours)} hrs</td>
       <td>${formatTruncatedMoney(emp.tipPerHour)}/hr</td>
-      <td>$${emp.tipout}</td>
+      <td>${formatRoundedDollar(emp.tipout)}</td>
     </tr>
   `).join('');
   return `
