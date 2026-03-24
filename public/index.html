@@ -519,6 +519,8 @@ canvas{max-height:280px}
       <div class="card" style="margin-bottom:20px">
         <div class="card-label" style="margin-bottom:12px">Household</div>
         <p style="font-size:.75rem;color:var(--text-mute);margin-bottom:12px;font-family:var(--mono)">Join or create a household to share shift data with family members (read-only access to each other's data).</p>
+        <!-- Pending invitations for current user -->
+        <div id="household-my-invitations" style="display:none;margin-bottom:14px"></div>
         <div id="household-list"></div>
         <div class="divider"></div>
         <div class="form-grid">
@@ -1698,6 +1700,9 @@ async function deleteGoal(id){
 
 // ── Households ──
 async function loadHouseholds(){
+  // Load pending invitations for current user
+  loadMyInvitations();
+
   const households=await fetch('/api/households').then(r=>r.json());
   const el=$('household-list');
   if(!el)return;
@@ -1711,10 +1716,45 @@ async function loadHouseholds(){
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
         <span style="font-family:var(--mono);font-size:.7rem;color:var(--text-dim);background:var(--surface2);padding:3px 8px;border-radius:4px" title="Share this code with family members">Code: ${esc(h.invite_code)}</span>
         <button class="btn btn-ghost btn-sm" onclick="showHouseholdMembers(${h.id},'${esc(h.name)}')">Members</button>
+        <button class="btn btn-ghost btn-sm" onclick="showInviteForm(${h.id},'${esc(h.name)}')">Invite</button>
         <button class="btn btn-danger btn-sm" onclick="leaveHousehold(${h.id},'${esc(h.name)}')">Leave</button>
       </div>
     </div>
   `).join('');
+}
+
+async function loadMyInvitations(){
+  const el=$('household-my-invitations');
+  if(!el)return;
+  const invitations=await fetch('/api/households/invitations/mine').then(r=>r.json());
+  if(!invitations.length){el.style.display='none';return;}
+  el.style.display='block';
+  el.innerHTML='<div class="card-label" style="margin-bottom:8px">Pending Invitations</div>'+invitations.map(inv=>`
+    <div class="user-card" style="margin-bottom:8px">
+      <div class="user-info" style="flex:1">
+        <strong>${esc(inv.household_name)}</strong>
+        <small>Invited by ${esc(inv.invited_by_name)} (@${esc(inv.invited_by_username)}) &middot; ${new Date(inv.created_at).toLocaleDateString()}</small>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-primary btn-sm" onclick="acceptInvitation(${inv.id})">Accept</button>
+        <button class="btn btn-ghost btn-sm" onclick="declineInvitation(${inv.id})">Decline</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function acceptInvitation(id){
+  const res=await fetch('/api/households/invitations/'+id+'/accept',{method:'POST'});
+  const d=await res.json();
+  if(!res.ok){toast(d.error||'Error','error');return}
+  toast('Joined household!','success');loadHouseholds();
+}
+
+async function declineInvitation(id){
+  const res=await fetch('/api/households/invitations/'+id+'/decline',{method:'POST'});
+  const d=await res.json();
+  if(!res.ok){toast(d.error||'Error','error');return}
+  toast('Invitation declined','success');loadMyInvitations();
 }
 
 async function createHousehold(){
@@ -1743,8 +1783,20 @@ async function leaveHousehold(id,name){
 
 async function showHouseholdMembers(id,name){
   const members=await fetch('/api/households/'+id+'/members').then(r=>r.json());
-  const list=members.map(m=>`• ${m.display_name} (@${m.username})`).join('\n');
+  const list=members.map(m=>{
+    const role=m.role==='admin'?' (admin)':'';
+    return '\u2022 '+m.display_name+' (@'+m.username+')'+role;
+  }).join('\n');
   alert('Members of "'+name+'":\n\n'+list);
+}
+
+async function showInviteForm(id,name){
+  const username=prompt('Invite a user to "'+name+'".\n\nEnter their username:');
+  if(!username)return;
+  const res=await fetch('/api/households/'+id+'/invite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username.trim()})});
+  const d=await res.json();
+  if(!res.ok){toast(d.error||'Failed to invite','error');return}
+  toast('Invitation sent to @'+username.trim(),'success');
 }
 
 // ── Toast ──

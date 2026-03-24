@@ -298,6 +298,27 @@ function migrate() {
         db.prepare('UPDATE goals     SET user_id = ? WHERE user_id IS NULL').run(admin.id);
       }
     },
+    // v14: household invitations table + role column on household_members
+    () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS household_invitations (
+          id           INTEGER PRIMARY KEY AUTOINCREMENT,
+          household_id INTEGER NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+          invitee_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          invited_by   INTEGER NOT NULL REFERENCES users(id),
+          status       TEXT    NOT NULL DEFAULT 'pending',
+          created_at   TEXT    DEFAULT (datetime('now'))
+        )
+      `);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_hh_inv_invitee_status ON household_invitations(invitee_id, status)`);
+      // Add role column to household_members if not present
+      const hmCols = db.prepare('PRAGMA table_info(household_members)').all().map(c => c.name);
+      if (!hmCols.includes('role')) {
+        db.exec("ALTER TABLE household_members ADD COLUMN role TEXT NOT NULL DEFAULT 'member'");
+        // Set household creators as admins
+        db.exec("UPDATE household_members SET role = 'admin' WHERE EXISTS (SELECT 1 FROM households h WHERE h.id = household_members.household_id AND h.created_by = household_members.user_id)");
+      }
+    },
   ];
 
   const tx = db.transaction(() => {
@@ -504,6 +525,8 @@ const passwordChangeRateLimit = createRateLimiter(15 * 60 * 1000, 5); // 5 passw
 const apiRateLimit = createRateLimiter(60 * 1000, 120); // 120 requests per minute per IP
 // Rate limiter for user profile/management endpoints
 const profileRateLimit = createRateLimiter(15 * 60 * 1000, 60); // 60 requests per 15 min
+// Rate limiter for household mutation endpoints
+const householdRateLimit = createRateLimiter(15 * 60 * 1000, 30); // 30 requests per 15 min
 
 // Safe error response — never leak internal error details in production
 function internalError(res, err) {
@@ -922,6 +945,10 @@ const HouseholdSchema = z.object({
   name: z.string().min(1).max(100),
 });
 
+const InviteSchema = z.object({
+  username: z.string().min(1),
+});
+
 // GET /api/households — list households the current user belongs to
 app.get('/api/households', authMiddleware, (req, res) => {
   const households = db.prepare(`
@@ -941,7 +968,7 @@ app.get('/api/households/:id/members', authMiddleware, (req, res) => {
   const membership = db.prepare('SELECT * FROM household_members WHERE household_id = ? AND user_id = ?').get(householdId, req.user.id);
   if (!membership && !req.user.is_admin) return res.status(403).json({ error: 'Not a member of this household' });
   const members = db.prepare(`
-    SELECT u.id, u.username, u.display_name, u.color, hm.joined_at
+    SELECT u.id, u.username, u.display_name, u.color, hm.joined_at, hm.role
     FROM household_members hm
     JOIN users u ON hm.user_id = u.id
     WHERE hm.household_id = ?
@@ -951,7 +978,7 @@ app.get('/api/households/:id/members', authMiddleware, (req, res) => {
 });
 
 // POST /api/households — create a new household (creator auto-joins)
-app.post('/api/households', authMiddleware, validate(HouseholdSchema), (req, res) => {
+app.post('/api/households', authMiddleware, householdRateLimit, validate(HouseholdSchema), (req, res) => {
   try {
     const { name } = req.validated;
     const inviteCode = crypto.randomBytes(6).toString('hex');
@@ -967,7 +994,7 @@ app.post('/api/households', authMiddleware, validate(HouseholdSchema), (req, res
 });
 
 // POST /api/households/join — join a household via invite code
-app.post('/api/households/join', authMiddleware, (req, res) => {
+app.post('/api/households/join', authMiddleware, householdRateLimit, (req, res) => {
   try {
     const { invite_code } = req.body;
     if (!invite_code) return res.status(400).json({ error: 'invite_code required' });
@@ -985,7 +1012,7 @@ app.post('/api/households/join', authMiddleware, (req, res) => {
 });
 
 // DELETE /api/households/:id/leave — leave a household
-app.delete('/api/households/:id/leave', authMiddleware, (req, res) => {
+app.delete('/api/households/:id/leave', authMiddleware, householdRateLimit, (req, res) => {
   const householdId = parseInt(req.params.id, 10);
   const membership = db.prepare('SELECT * FROM household_members WHERE household_id = ? AND user_id = ?').get(householdId, req.user.id);
   if (!membership) return res.status(404).json({ error: 'Not a member of this household' });
@@ -997,7 +1024,7 @@ app.delete('/api/households/:id/leave', authMiddleware, (req, res) => {
 });
 
 // DELETE /api/households/:id — delete a household (creator or admin only)
-app.delete('/api/households/:id', authMiddleware, (req, res) => {
+app.delete('/api/households/:id', authMiddleware, householdRateLimit, (req, res) => {
   const householdId = parseInt(req.params.id, 10);
   const household = db.prepare('SELECT * FROM households WHERE id = ?').get(householdId);
   if (!household) return res.status(404).json({ error: 'Household not found' });
@@ -1009,7 +1036,7 @@ app.delete('/api/households/:id', authMiddleware, (req, res) => {
 });
 
 // PUT /api/households/:id — rename a household (creator or admin only)
-app.put('/api/households/:id', authMiddleware, validate(HouseholdSchema), (req, res) => {
+app.put('/api/households/:id', authMiddleware, householdRateLimit, validate(HouseholdSchema), (req, res) => {
   const householdId = parseInt(req.params.id, 10);
   const household = db.prepare('SELECT * FROM households WHERE id = ?').get(householdId);
   if (!household) return res.status(404).json({ error: 'Household not found' });
@@ -1022,7 +1049,7 @@ app.put('/api/households/:id', authMiddleware, validate(HouseholdSchema), (req, 
 });
 
 // DELETE /api/households/:id/members/:userId — remove a member (creator or admin only)
-app.delete('/api/households/:id/members/:userId', authMiddleware, (req, res) => {
+app.delete('/api/households/:id/members/:userId', authMiddleware, householdRateLimit, (req, res) => {
   const householdId = parseInt(req.params.id, 10);
   const targetUserId = parseInt(req.params.userId, 10);
   const household = db.prepare('SELECT * FROM households WHERE id = ?').get(householdId);
@@ -1033,6 +1060,120 @@ app.delete('/api/households/:id/members/:userId', authMiddleware, (req, res) => 
   db.prepare('DELETE FROM household_members WHERE household_id = ? AND user_id = ?').run(householdId, targetUserId);
   const remaining = db.prepare('SELECT COUNT(*) as c FROM household_members WHERE household_id = ?').get(householdId).c;
   if (remaining === 0) db.prepare('DELETE FROM households WHERE id = ?').run(householdId);
+  res.json({ success: true });
+});
+
+// ── Household Invitation Routes ──────────────────────────────────────────────
+
+// POST /api/households/:id/invite — invite another user by username (household creator or admin only)
+app.post('/api/households/:id/invite', authMiddleware, householdRateLimit, validate(InviteSchema), (req, res) => {
+  try {
+    const householdId = parseInt(req.params.id, 10);
+    const household = db.prepare('SELECT * FROM households WHERE id = ?').get(householdId);
+    if (!household) return res.status(404).json({ error: 'Household not found' });
+
+    // Only the household creator or site admin can invite
+    if (household.created_by !== req.user.id && !req.user.is_admin) {
+      return res.status(403).json({ error: 'Only the household creator or an admin can invite members' });
+    }
+
+    // Enforce a reasonable household size limit
+    const MAX_HOUSEHOLD_SIZE = 20;
+    const memberCount = db.prepare('SELECT COUNT(*) as c FROM household_members WHERE household_id = ?').get(householdId).c;
+    if (memberCount >= MAX_HOUSEHOLD_SIZE) return res.status(400).json({ error: `Household is full (max ${MAX_HOUSEHOLD_SIZE} members)` });
+
+    const { username } = req.validated;
+    const target = db.prepare('SELECT id, display_name FROM users WHERE username = ?').get(username);
+    if (!target) return res.status(404).json({ error: 'User not found' });
+    if (target.id === req.user.id) return res.status(400).json({ error: 'Cannot invite yourself' });
+
+    const existingMember = db.prepare('SELECT * FROM household_members WHERE household_id = ? AND user_id = ?').get(householdId, target.id);
+    if (existingMember) return res.status(409).json({ error: 'User is already a member of this household' });
+
+    const existingInvite = db.prepare(
+      "SELECT id FROM household_invitations WHERE household_id = ? AND invitee_id = ? AND status = 'pending'"
+    ).get(householdId, target.id);
+    if (existingInvite) return res.status(409).json({ error: 'Invitation already sent to this user' });
+
+    db.prepare('INSERT INTO household_invitations (household_id, invitee_id, invited_by) VALUES (?,?,?)')
+      .run(householdId, target.id, req.user.id);
+    res.json({ success: true });
+  } catch (e) {
+    logger.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/households/:id/invitations — list pending invitations for a household (creator or admin)
+app.get('/api/households/:id/invitations', authMiddleware, householdRateLimit, (req, res) => {
+  const householdId = parseInt(req.params.id, 10);
+  const household = db.prepare('SELECT * FROM households WHERE id = ?').get(householdId);
+  if (!household) return res.status(404).json({ error: 'Household not found' });
+  if (household.created_by !== req.user.id && !req.user.is_admin) {
+    return res.status(403).json({ error: 'Only the household creator or an admin can view invitations' });
+  }
+  const invitations = db.prepare(`
+    SELECT hi.id, hi.invitee_id, hi.created_at, u.username as invitee_username,
+           u.display_name as invitee_display_name, inv.display_name as invited_by_name
+    FROM household_invitations hi
+    JOIN users u ON hi.invitee_id = u.id
+    JOIN users inv ON hi.invited_by = inv.id
+    WHERE hi.household_id = ? AND hi.status = 'pending'
+    ORDER BY hi.created_at DESC
+  `).all(householdId);
+  res.json(invitations);
+});
+
+// GET /api/households/invitations/mine — pending invitations for the current user
+app.get('/api/households/invitations/mine', authMiddleware, householdRateLimit, (req, res) => {
+  const invitations = db.prepare(`
+    SELECT hi.id, hi.household_id, hi.created_at, h.name as household_name,
+           inv.display_name as invited_by_name, inv.username as invited_by_username
+    FROM household_invitations hi
+    JOIN households h ON hi.household_id = h.id
+    JOIN users inv ON hi.invited_by = inv.id
+    WHERE hi.invitee_id = ? AND hi.status = 'pending'
+    ORDER BY hi.created_at DESC
+  `).all(req.user.id);
+  res.json(invitations);
+});
+
+// POST /api/households/invitations/:id/accept — accept an invitation
+app.post('/api/households/invitations/:id/accept', authMiddleware, householdRateLimit, (req, res) => {
+  try {
+    const invId = parseInt(req.params.id, 10);
+    const inv = db.prepare("SELECT * FROM household_invitations WHERE id = ? AND status = 'pending'").get(invId);
+    if (!inv) return res.status(404).json({ error: 'Invitation not found or already handled' });
+    if (inv.invitee_id !== req.user.id) return res.status(403).json({ error: 'Not your invitation' });
+
+    // Check if user is already a member of this household
+    const existingMember = db.prepare('SELECT * FROM household_members WHERE household_id = ? AND user_id = ?').get(inv.household_id, req.user.id);
+    if (existingMember) {
+      db.prepare("UPDATE household_invitations SET status = 'accepted' WHERE id = ?").run(invId);
+      return res.status(409).json({ error: 'You are already a member of this household' });
+    }
+
+    const tx = db.transaction(() => {
+      db.prepare("UPDATE household_invitations SET status = 'accepted' WHERE id = ?").run(invId);
+      db.prepare("INSERT INTO household_members (household_id, user_id, role) VALUES (?,?,'member')").run(inv.household_id, req.user.id);
+      // Clean up any duplicate pending invitations for this user to the same household
+      db.prepare("UPDATE household_invitations SET status = 'declined' WHERE invitee_id = ? AND household_id = ? AND id != ? AND status = 'pending'").run(req.user.id, inv.household_id, invId);
+    });
+    tx();
+    res.json({ success: true });
+  } catch (e) {
+    logger.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/households/invitations/:id/decline — decline an invitation
+app.post('/api/households/invitations/:id/decline', authMiddleware, householdRateLimit, (req, res) => {
+  const invId = parseInt(req.params.id, 10);
+  const inv = db.prepare("SELECT * FROM household_invitations WHERE id = ? AND status = 'pending'").get(invId);
+  if (!inv) return res.status(404).json({ error: 'Invitation not found or already handled' });
+  if (inv.invitee_id !== req.user.id) return res.status(403).json({ error: 'Not your invitation' });
+  db.prepare("UPDATE household_invitations SET status = 'declined' WHERE id = ?").run(invId);
   res.json({ success: true });
 });
 
