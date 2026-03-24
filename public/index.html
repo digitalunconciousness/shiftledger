@@ -999,7 +999,7 @@ function calculateTipouts(totalTips,employees){
     name:employee.name||'Unnamed Employee',
     hours:employee.hours,
     tipPerHour,
-    tipout:truncateToTwoDec(employee.hours*tipPerHour)
+    tipout:roundWholeDollar(truncateToTwoDec(employee.hours*tipPerHour))
   }));
   const totalTipouts=truncateToTwoDec(calculatedEmployees.reduce((sum,e)=>sum+e.tipout,0));
   return{
@@ -1017,7 +1017,7 @@ function renderTipCalculatorResult(result){
       <td>${esc(emp.name)}</td>
       <td>${formatFixed(emp.hours)} hrs</td>
       <td>${formatTruncatedMoney(emp.tipPerHour)}/hr</td>
-      <td>${formatTruncatedMoney(emp.tipout)}</td>
+      <td>$${emp.tipout}</td>
     </tr>
   `).join('');
   return `
