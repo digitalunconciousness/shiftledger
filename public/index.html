@@ -720,8 +720,8 @@ canvas{max-height:280px}
 let currentUser = null;
 let trendChart=null,breakdownChart=null,tipRatioChart=null,effRateChart=null;
 let currentPeriod='month';
-let dashFilterUser='';
-let histFilterUser='';
+let dashFilterUser='mine';
+let histFilterUser='mine';
 let jobsCache=[];
 let templatesCache=[];
 
@@ -910,13 +910,16 @@ function clearForm(){
 function setDashFilter(el,uid){
   document.querySelectorAll('#dash-filter .filter-btn').forEach(b=>b.classList.remove('active'));
   el.classList.add('active');
-  dashFilterUser=uid===''?'all':'';
+  dashFilterUser=uid===''?'all':'mine';
   loadDashboard();
 }
 
 async function loadDashboard(){
-  const qs=dashFilterUser==='all'?'?user_id=all':'';
-  const qsa=dashFilterUser==='all'?'&user_id=all':'';
+  const myId=currentUser?currentUser.id:'';
+  const isMine=dashFilterUser==='mine';
+  const isAll=dashFilterUser==='all';
+  const qs=isMine&&myId?`?user_id=${myId}`:isAll&&currentUser&&currentUser.is_admin?'?user_id=all':'';
+  const qsa=isMine&&myId?`&user_id=${myId}`:isAll&&currentUser&&currentUser.is_admin?'&user_id=all':'';
   const[sumRes,trendRes,dowRes,tipRes,otRes,taxRes,goalsRes,pchkRes,histRes]=await Promise.all([
     fetch('/api/summary'+qs),fetch('/api/trends?period='+currentPeriod+qsa),
     fetch('/api/analytics/effective-rate'+qs),fetch('/api/analytics/tip-ratio'+qs),
@@ -1088,7 +1091,7 @@ function renderEffRateChart(data){
 function setHistFilter(el,uid){
   el.parentElement.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
   el.classList.add('active');
-  histFilterUser=uid===''?'all':'';
+  histFilterUser=uid===''?'all':'mine';
   loadHistory();
 }
 
@@ -1096,7 +1099,9 @@ async function loadHistory(){
   const from=gv('hist-from'),to=gv('hist-to');
   let url='/api/shifts?';
   if(from&&to)url+=`from=${from}&to=${to}&`;else if(from)url+=`from=${from}&`;
-  if(histFilterUser==='all')url+=`user_id=all&`;
+  const myId=currentUser?currentUser.id:'';
+  if(histFilterUser==='mine'&&myId)url+=`user_id=${myId}&`;
+  else if(histFilterUser==='all'&&currentUser&&currentUser.is_admin)url+=`user_id=all&`;
   const shifts=await fetch(url).then(r=>r.json());
   const tbody=$('history-body');
   if(!shifts.length){tbody.innerHTML='<tr><td colspan="11" class="empty">No shifts found.</td></tr>';$('history-totals').style.display='none';return}

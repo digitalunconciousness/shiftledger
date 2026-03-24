@@ -327,9 +327,8 @@ function getVisibleUserIds(userId) {
 }
 
 // Returns an array of user IDs to filter by, or null to show all users' data.
-// Non-admins always see their own + household members' data.
 // Admins can pass user_id=all (all data) or user_id=<id> (specific user).
-// Omitting user_id defaults to current user for both roles.
+// Non-admins: pass user_id=<own_id> for strictly personal data; omit for self + household.
 function resolveUserFilter(req) {
   const param = req.query.user_id;
   if (req.user && req.user.is_admin) {
@@ -338,6 +337,8 @@ function resolveUserFilter(req) {
     return [req.user.id];
   }
   if (!req.user) return null;
+  // Non-admin: if the caller explicitly requests their own ID, return only them.
+  if (param && parseInt(param, 10) === req.user.id) return [req.user.id];
   return getVisibleUserIds(req.user.id);
 }
 
