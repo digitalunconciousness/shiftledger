@@ -502,6 +502,8 @@ const authRateLimit = createRateLimiter(15 * 60 * 1000, 20); // 20 requests per 
 const passwordChangeRateLimit = createRateLimiter(15 * 60 * 1000, 5); // 5 password changes per 15 min
 // General API rate limiter
 const apiRateLimit = createRateLimiter(60 * 1000, 120); // 120 requests per minute per IP
+// Rate limiter for user profile/management endpoints
+const profileRateLimit = createRateLimiter(15 * 60 * 1000, 60); // 60 requests per 15 min
 
 // Safe error response — never leak internal error details in production
 function internalError(res, err) {
@@ -605,6 +607,15 @@ const RegisterSchema = z.object({
   password: z.string().min(4).max(200),
   display_name: z.string().min(1).max(100),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+});
+
+const UpdateProfileSchema = z.object({
+  display_name: z.string().min(1).max(100).optional(),
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+});
+
+const AdminUpdateProfileSchema = UpdateProfileSchema.extend({
+  is_admin: z.boolean().optional(),
 });
 
 const LoginSchema = z.object({
@@ -821,13 +832,14 @@ app.post('/api/auth/refresh', authRateLimit, (req, res) => {
 
 // ── User Management Routes ───────────────────────────────────────────────────
 
-app.get('/api/users', authMiddleware, adminOnly, (req, res) => {
+// GET /api/users — admin-only list of all users
+app.get('/api/users', authMiddleware, adminOnly, profileRateLimit, (req, res) => {
   const users = db.prepare('SELECT id, username, display_name, is_admin, color, created_at FROM users').all();
-  res.json(users);
+  res.json(users.map(u => ({ ...u, is_admin: !!u.is_admin })));
 });
 
 // GET /api/profile — current user's profile + household membership
-app.get('/api/profile', authMiddleware, (req, res) => {
+app.get('/api/profile', authMiddleware, profileRateLimit, (req, res) => {
   const user = db.prepare('SELECT id, username, display_name, is_admin, color, created_at FROM users WHERE id = ?').get(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
   const households = db.prepare(`
@@ -837,23 +849,60 @@ app.get('/api/profile', authMiddleware, (req, res) => {
     JOIN household_members hm ON h.id = hm.household_id
     WHERE hm.user_id = ?
   `).all(req.user.id);
-  res.json({ ...user, households });
+  res.json({ ...user, is_admin: !!user.is_admin, households });
 });
 
-app.put('/api/users/:id', authMiddleware, async (req, res) => {
+// GET /api/users/:id — own profile or admin access
+app.get('/api/users/:id', authMiddleware, profileRateLimit, (req, res) => {
+  const targetId = parseInt(req.params.id, 10);
+  const isOwnProfile = req.user && req.user.id === targetId;
+  const isAdmin = req.user && req.user.is_admin;
+  if (!isOwnProfile && !isAdmin) return res.status(403).json({ error: 'Forbidden' });
+  const user = db.prepare('SELECT id, username, display_name, is_admin, color, created_at FROM users WHERE id = ?').get(targetId);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  const households = db.prepare(`
+    SELECT h.id, h.name, h.invite_code, h.created_by,
+           (SELECT COUNT(*) FROM household_members WHERE household_id = h.id) as member_count
+    FROM households h
+    JOIN household_members hm ON h.id = hm.household_id
+    WHERE hm.user_id = ?
+  `).all(targetId);
+  res.json({ ...user, is_admin: !!user.is_admin, households });
+});
+
+app.put('/api/users/:id', authMiddleware, profileRateLimit, (req, res, next) => {
+  const isAdmin = req.user && req.user.is_admin;
+  return (isAdmin ? validate(AdminUpdateProfileSchema) : validate(UpdateProfileSchema))(req, res, next);
+}, async (req, res) => {
   try {
     const targetId = parseInt(req.params.id, 10);
     const isOwnProfile = req.user && req.user.id === targetId;
     const isAdmin = req.user && req.user.is_admin;
     if (!isOwnProfile && !isAdmin) return res.status(403).json({ error: 'Forbidden' });
 
-    const { display_name, color, is_admin } = req.body;
-    if (display_name) db.prepare('UPDATE users SET display_name = ? WHERE id = ?').run(display_name, targetId);
-    if (color) db.prepare('UPDATE users SET color = ? WHERE id = ?').run(color, targetId);
+    const { display_name, color, is_admin } = req.validated;
+    const changes = [];
+
+    if (display_name !== undefined) {
+      db.prepare('UPDATE users SET display_name = ? WHERE id = ?').run(display_name, targetId);
+      changes.push('display_name');
+    }
+    if (color !== undefined) {
+      db.prepare('UPDATE users SET color = ? WHERE id = ?').run(color, targetId);
+      changes.push('color');
+    }
     if (isAdmin && is_admin !== undefined) {
       db.prepare('UPDATE users SET is_admin = ? WHERE id = ?').run(is_admin ? 1 : 0, targetId);
+      changes.push('is_admin');
     }
-    res.json({ success: true });
+
+    if (changes.length > 0) {
+      db.prepare(`INSERT INTO audit_log (actor_id, target_id, action, detail) VALUES (?,?,?,?)`)
+        .run(req.user.id, targetId, 'profile_update', `Updated fields: ${changes.join(', ')}`);
+    }
+
+    const updated = db.prepare('SELECT id, username, display_name, is_admin, color, created_at FROM users WHERE id = ?').get(targetId);
+    res.json({ success: true, user: { ...updated, is_admin: !!updated.is_admin } });
   } catch (e) {
     internalError(res, e);
   }

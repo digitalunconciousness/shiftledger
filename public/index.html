@@ -456,6 +456,8 @@ canvas{max-height:280px}
           <div>
             <div id="profile-username" style="font-family:var(--mono);font-size:.85rem;color:var(--text-dim)"></div>
             <div id="profile-role" style="font-family:var(--mono);font-size:.72rem;margin-top:2px"></div>
+            <div id="set-joined-display" style="font-family:var(--mono);font-size:.7rem;color:var(--text-mute);margin-top:2px"></div>
+            <div id="set-household-display" style="font-family:var(--mono);font-size:.7rem;color:var(--text-mute);margin-top:2px"></div>
           </div>
         </div>
         <div class="form-grid">
@@ -693,6 +695,29 @@ canvas{max-height:280px}
     </div>
     <div class="divider"></div>
     <div style="display:flex;gap:10px"><button class="btn btn-primary" onclick="saveJobEdit()">Save</button><button class="btn btn-ghost" onclick="closeJobModal()">Cancel</button></div>
+  </div>
+</div>
+
+<!-- Admin: Edit User Profile Modal -->
+<div class="modal-overlay" id="user-edit-modal" role="dialog" aria-modal="true" aria-labelledby="user-modal-title">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title" id="user-modal-title">Edit User Profile</span><button class="close-btn" onclick="closeUserModal()" aria-label="Close edit user dialog"><span aria-hidden="true">&times;</span></button></div>
+    <div id="eu-profile-info" style="display:flex;align-items:center;gap:14px;margin-bottom:16px">
+      <div id="eu-avatar" style="width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:700;font-size:1rem;color:#0a0a0a"></div>
+      <div>
+        <div id="eu-username-display" style="font-family:var(--mono);font-size:.85rem;color:var(--text-dim)"></div>
+        <div id="eu-role-display" style="font-family:var(--mono);font-size:.72rem;margin-top:2px"></div>
+        <div id="eu-joined-display" style="font-family:var(--mono);font-size:.7rem;color:var(--text-mute);margin-top:2px"></div>
+        <div id="eu-household-display" style="font-family:var(--mono);font-size:.7rem;color:var(--text-mute);margin-top:2px"></div>
+      </div>
+    </div>
+    <input type="hidden" id="eu-id">
+    <div class="form-grid">
+      <div class="form-group"><label>Display Name</label><input id="eu-name"></div>
+      <div class="form-group"><label>Color</label><input type="color" id="eu-color" style="height:42px;padding:4px" oninput="document.getElementById('eu-avatar').style.background=this.value"></div>
+    </div>
+    <div class="divider"></div>
+    <div style="display:flex;gap:10px"><button class="btn btn-primary" onclick="saveUserEdit()">Save</button><button class="btn btn-ghost" onclick="closeUserModal()">Cancel</button></div>
   </div>
 </div>
 
@@ -1186,18 +1211,27 @@ async function loadAppSettings(){
 }
 
 async function loadSettings(){
-  // Profile section (all users)
-  $('set-name').value=currentUser.display_name;$('set-color').value=currentUser.color;
-  const roleEl=$('profile-role');
-  if(roleEl) roleEl.textContent=currentUser.is_admin?'Administrator':'Member';
-  const avatarEl=$('profile-avatar');
-  if(avatarEl){avatarEl.style.background=currentUser.color;avatarEl.textContent=(currentUser.display_name||'?')[0].toUpperCase();}
-  const usernameEl=$('profile-username');
-  if(usernameEl) usernameEl.textContent='@'+currentUser.username;
+  // Profile section (all users) — fetch fresh data from API for join date + households
+  try {
+    const profile=await fetch('/api/profile').then(r=>r.json());
+    $('set-name').value=profile.display_name;
+    $('set-color').value=profile.color;
+    const roleEl=$('profile-role');
+    if(roleEl) roleEl.textContent=profile.is_admin?'Administrator':'User';
+    const avatarEl=$('profile-avatar');
+    if(avatarEl){avatarEl.style.background=profile.color;avatarEl.textContent=((profile.display_name||'').trim()||'?')[0].toUpperCase();}
+    const usernameEl=$('profile-username');
+    if(usernameEl) usernameEl.textContent='@'+profile.username;
+    const joinedEl=$('set-joined-display');
+    if(joinedEl) joinedEl.textContent='Joined '+new Date(profile.created_at).toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
+    const hhEl=$('set-household-display');
+    if(hhEl) hhEl.textContent=profile.households&&profile.households.length>0?'Household: '+profile.households.map(h=>h.name).join(', '):'No household';
+  } catch(e) {
+    $('set-name').value=currentUser.display_name;$('set-color').value=currentUser.color;
+  }
 
   // Load jobs, goals, tax config for all users
   loadJobsList();loadGoalsList();loadTaxConfig();loadHouseholds();
-
   if(currentUser.is_admin){
     loadUsersList();loadAuditLog();
     const s=await loadAppSettings();
@@ -1482,7 +1516,9 @@ async function saveProfile(){
   const res=await fetch('/api/users/'+currentUser.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const data=await res.json();
   if(!res.ok){toast(data.error||'Failed to save profile','error');return}
-  currentUser.display_name=body.display_name;currentUser.color=body.color;
+  currentUser.display_name=data.user.display_name;currentUser.color=data.user.color;
+  const avatarEl=$('profile-avatar');
+  if(avatarEl){avatarEl.style.background=currentUser.color;avatarEl.textContent=((currentUser.display_name||'').trim()||'?')[0].toUpperCase();}
   $('topbar-user').innerHTML=`<span class="user-dot" style="background:${currentUser.color}"></span>${esc(currentUser.display_name)}`;
   toast('Profile saved','success');
 }
@@ -1505,7 +1541,7 @@ async function loadUsersList(){
     <div class="user-card">
       <span class="user-dot" style="background:${u.color}"></span>
       <div class="user-info"><strong>${esc(u.display_name)}</strong><small>@${esc(u.username)} ${u.is_admin?'· Admin':''}</small></div>
-      ${u.id!==currentUser.id?`<div style="display:flex;gap:6px"><button class="btn btn-ghost btn-sm" onclick="toggleAdmin(${u.id},${u.is_admin?0:1})">${u.is_admin?'Demote':'Promote'}</button><button class="btn btn-ghost btn-sm" onclick="openResetPwModal(${u.id},'${esc(u.username)}')">Reset PW</button><button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id})">Delete</button></div>`:'<span style="font-family:var(--mono);font-size:.7rem;color:var(--text-mute)">You</span>'}
+      ${u.id!==currentUser.id?`<div style="display:flex;gap:6px"><button class="btn btn-ghost btn-sm" onclick="openUserModal(${u.id})">Edit</button><button class="btn btn-ghost btn-sm" onclick="toggleAdmin(${u.id},${u.is_admin?0:1})">${u.is_admin?'Demote':'Promote'}</button><button class="btn btn-ghost btn-sm" onclick="openResetPwModal(${u.id},'${esc(u.username)}')">Reset PW</button><button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id})">Delete</button></div>`:'<span style="font-family:var(--mono);font-size:.7rem;color:var(--text-mute)">You</span>'}
     </div>
   `).join('');
 }
@@ -1552,13 +1588,41 @@ async function addUser(){
 }
 
 async function toggleAdmin(id,val){
-  await fetch('/api/users/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({is_admin:!!val})});
+  const res=await fetch('/api/users/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({is_admin:!!val})});
+  if(!res.ok){const d=await res.json();toast(d.error||'Failed','error');return}
   loadUsersList();
 }
 
 async function deleteUser(id){
   if(!confirm('Delete this user?'))return;
   await fetch('/api/users/'+id,{method:'DELETE'});toast('User deleted','success');loadUsersList();
+}
+
+async function openUserModal(id){
+  const user=await fetch('/api/users/'+id).then(r=>r.json());
+  $('eu-id').value=user.id;
+  $('eu-name').value=user.display_name;
+  $('eu-color').value=user.color;
+  const avatarEl=$('eu-avatar');
+  if(avatarEl){avatarEl.style.background=user.color;avatarEl.textContent=((user.display_name||'').trim()||'?')[0].toUpperCase();}
+  $('eu-username-display').textContent='@'+user.username;
+  $('eu-role-display').textContent=user.is_admin?'Administrator':'User';
+  $('eu-joined-display').textContent='Joined '+new Date(user.created_at).toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
+  const hhText=user.households&&user.households.length>0?'Household: '+user.households.map(h=>h.name).join(', '):'No household';
+  $('eu-household-display').textContent=hhText;
+  $('user-edit-modal').classList.add('open');
+}
+
+function closeUserModal(){$('user-edit-modal').classList.remove('open')}
+$('user-edit-modal').addEventListener('click',function(e){if(e.target===this)closeUserModal()});
+
+async function saveUserEdit(){
+  const id=parseInt($('eu-id').value,10);
+  const body={display_name:$('eu-name').value.trim(),color:$('eu-color').value};
+  const res=await fetch('/api/users/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const data=await res.json();
+  if(!res.ok){toast(data.error||'Failed to save','error');return}
+  closeUserModal();toast('Profile updated','success');loadUsersList();
 }
 
 async function loadJobsList(){
@@ -1691,7 +1755,7 @@ document.addEventListener('keydown',e=>{
   const tag=document.activeElement.tagName;
   if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT')return;
   if(e.key==='?'){e.preventDefault();$('shortcut-overlay').classList.toggle('open');return}
-  if(e.key==='Escape'){$('shortcut-overlay').classList.remove('open');closeEditModal();return}
+  if(e.key==='Escape'){$('shortcut-overlay').classList.remove('open');closeEditModal();closeUserModal();return}
   const idx='12345'.indexOf(e.key);
   if(idx>=0&&idx<viewKeys.length){
     const navItems=document.querySelectorAll('.nav-item');
