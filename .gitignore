@@ -7,3 +7,6 @@ backups/
 mobile/node_modules/
 mobile/.expo/
 mobile/.env
+issues/issue-9-plan.md
+mobile/app.json
+shiftledger.wiki/
