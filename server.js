@@ -319,6 +319,25 @@ function migrate() {
         db.exec("UPDATE household_members SET role = 'admin' WHERE EXISTS (SELECT 1 FROM households h WHERE h.id = household_members.household_id AND h.created_by = household_members.user_id)");
       }
     },
+    // v15: employers table + optional employer linkage on jobs
+    () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS employers (
+          id         INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          name       TEXT    NOT NULL,
+          no_tax     INTEGER NOT NULL DEFAULT 0,
+          archived   INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT    DEFAULT (datetime('now'))
+        )
+      `);
+      db.exec('CREATE INDEX IF NOT EXISTS idx_employers_user_archived ON employers(user_id, archived)');
+
+      const jobCols = db.prepare('PRAGMA table_info(jobs)').all().map(c => c.name);
+      if (!jobCols.includes('employer_id')) {
+        db.exec('ALTER TABLE jobs ADD COLUMN employer_id INTEGER REFERENCES employers(id)');
+      }
+    },
   ];
 
   const tx = db.transaction(() => {
@@ -596,6 +615,12 @@ const JobSchema = z.object({
   overtime_threshold: z.number().min(0).optional().default(40),
   overtime_multiplier: z.number().min(1).optional().default(1.5),
   tip_payment: z.enum(['cash', 'paycheck']).optional().default('cash'),
+  employer_id: z.number().int().nullable().optional().default(null),
+});
+
+const EmployerSchema = z.object({
+  name: z.string().min(1).max(100),
+  no_tax: z.boolean().optional().default(false),
 });
 
 const TemplateSchema = z.object({
@@ -702,6 +727,19 @@ function getPeriodBounds() {
   const ytdStart = new Date(now.getFullYear(), 0, 1);
 
   return { now, weekStart, lastWeekStart, lastWeekEnd, biweekStart, monthStart, lastMonthStart, lastMonthEnd, ytdStart };
+}
+
+function validateEmployerForJobAssignment(employerId, jobOwnerId) {
+  if (employerId === null) return null;
+  if (jobOwnerId === null) {
+    return { status: 400, error: 'Global jobs cannot be assigned to an employer' };
+  }
+  const employer = db.prepare('SELECT * FROM employers WHERE id = ? AND archived = 0').get(employerId);
+  if (!employer) return { status: 400, error: 'Employer not found' };
+  if (employer.user_id !== jobOwnerId) {
+    return { status: 400, error: 'Employer must belong to the job owner' };
+  }
+  return null;
 }
 
 // ── Auth Routes ──────────────────────────────────────────────────────────────
@@ -1334,29 +1372,91 @@ app.post('/api/shifts/:id/restore', authMiddleware, (req, res) => {
 
 // ── Jobs Routes ──────────────────────────────────────────────────────────────
 
-app.get('/api/jobs', authMiddleware, (req, res) => {
-  // Return the user's own jobs plus global (user_id IS NULL) jobs
-  if (!req.user) return res.json(db.prepare('SELECT * FROM jobs WHERE user_id IS NULL ORDER BY name ASC').all());
-  const visibleIds = getVisibleUserIds(req.user.id);
-  const placeholders = visibleIds.map(() => '?').join(',');
-  res.json(db.prepare(
-    `SELECT * FROM jobs WHERE (user_id IS NULL OR user_id IN (${placeholders})) ORDER BY name ASC`
-  ).all(...visibleIds));
+app.get('/api/employers', authMiddleware, profileRateLimit, (req, res) => {
+  if (!req.user) return res.json([]);
+  const visibleIds = req.user.is_admin ? null : getVisibleUserIds(req.user.id);
+  let sql = 'SELECT * FROM employers WHERE archived = 0';
+  const params = [];
+  if (visibleIds !== null) {
+    sql += ` AND user_id IN (${visibleIds.map(() => '?').join(',')})`;
+    params.push(...visibleIds);
+  }
+  sql += ' ORDER BY name ASC';
+  res.json(db.prepare(sql).all(...params));
 });
 
-app.post('/api/jobs', authMiddleware, validate(JobSchema), (req, res) => {
+app.post('/api/employers', authMiddleware, profileRateLimit, validate(EmployerSchema), (req, res) => {
   try {
-    const { name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment } = req.validated;
-    const userId = req.user ? req.user.id : null;
-    const result = db.prepare('INSERT INTO jobs (name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, user_id) VALUES (?,?,?,?,?,?,?)')
-      .run(name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, userId);
-    res.json({ id: result.lastInsertRowid, name, default_rate, color, tip_payment, user_id: userId });
+    if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
+    const { name, no_tax } = req.validated;
+    const result = db.prepare('INSERT INTO employers (user_id, name, no_tax) VALUES (?,?,?)')
+      .run(req.user.id, name, no_tax ? 1 : 0);
+    res.status(201).json({ id: result.lastInsertRowid, user_id: req.user.id, name, no_tax: no_tax ? 1 : 0, archived: 0 });
   } catch (e) {
     internalError(res, e);
   }
 });
 
-app.put('/api/jobs/:id', authMiddleware, validate(JobSchema), (req, res) => {
+app.put('/api/employers/:id', authMiddleware, profileRateLimit, validate(EmployerSchema), (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
+    const employer = db.prepare('SELECT * FROM employers WHERE id = ?').get(req.params.id);
+    if (!employer || employer.archived) return res.status(404).json({ error: 'Employer not found' });
+    if (employer.user_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Not your employer' });
+    const { name, no_tax } = req.validated;
+    db.prepare('UPDATE employers SET name = ?, no_tax = ? WHERE id = ?').run(name, no_tax ? 1 : 0, req.params.id);
+    res.json({ success: true });
+  } catch (e) {
+    internalError(res, e);
+  }
+});
+
+app.delete('/api/employers/:id', authMiddleware, profileRateLimit, (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
+    const employer = db.prepare('SELECT * FROM employers WHERE id = ?').get(req.params.id);
+    if (!employer || employer.archived) return res.status(404).json({ error: 'Employer not found' });
+    if (employer.user_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Not your employer' });
+    const tx = db.transaction(() => {
+      db.prepare('UPDATE jobs SET employer_id = NULL WHERE employer_id = ?').run(req.params.id);
+      db.prepare('UPDATE employers SET archived = 1 WHERE id = ?').run(req.params.id);
+    });
+    tx();
+    res.json({ success: true });
+  } catch (e) {
+    internalError(res, e);
+  }
+});
+
+app.get('/api/jobs', authMiddleware, profileRateLimit, (req, res) => {
+  // Return the user's own jobs plus global (user_id IS NULL) jobs
+  if (!req.user) return res.json(db.prepare('SELECT * FROM jobs WHERE user_id IS NULL ORDER BY name ASC').all());
+  const visibleIds = getVisibleUserIds(req.user.id);
+  const placeholders = visibleIds.map(() => '?').join(',');
+  res.json(db.prepare(
+    `SELECT j.*, e.name as employer_name, COALESCE(e.no_tax, 0) as employer_no_tax
+     FROM jobs j
+     LEFT JOIN employers e ON j.employer_id = e.id
+     WHERE (j.user_id IS NULL OR j.user_id IN (${placeholders}))
+     ORDER BY CASE WHEN e.name IS NULL THEN 1 ELSE 0 END, e.name ASC, j.name ASC`
+  ).all(...visibleIds));
+});
+
+app.post('/api/jobs', authMiddleware, profileRateLimit, validate(JobSchema), (req, res) => {
+  try {
+    const { name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, employer_id } = req.validated;
+    const userId = req.user ? req.user.id : null;
+    const employerValidation = validateEmployerForJobAssignment(employer_id, userId);
+    if (employerValidation) return res.status(employerValidation.status).json({ error: employerValidation.error });
+    const result = db.prepare('INSERT INTO jobs (name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, employer_id, user_id) VALUES (?,?,?,?,?,?,?,?)')
+      .run(name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, employer_id, userId);
+    res.json({ id: result.lastInsertRowid, name, default_rate, color, tip_payment, employer_id, user_id: userId });
+  } catch (e) {
+    internalError(res, e);
+  }
+});
+
+app.put('/api/jobs/:id', authMiddleware, profileRateLimit, validate(JobSchema), (req, res) => {
   try {
     const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(req.params.id);
     if (!job) return res.status(404).json({ error: 'Job not found' });
@@ -1367,16 +1467,18 @@ app.put('/api/jobs/:id', authMiddleware, validate(JobSchema), (req, res) => {
     if (job.user_id === null && !req.user.is_admin) {
       return res.status(403).json({ error: 'Only admins can edit global jobs' });
     }
-    const { name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment } = req.validated;
-    db.prepare('UPDATE jobs SET name=?, default_rate=?, color=?, overtime_threshold=?, overtime_multiplier=?, tip_payment=? WHERE id=?')
-      .run(name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, req.params.id);
+    const { name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, employer_id } = req.validated;
+    const employerValidation = validateEmployerForJobAssignment(employer_id, job.user_id);
+    if (employerValidation) return res.status(employerValidation.status).json({ error: employerValidation.error });
+    db.prepare('UPDATE jobs SET name=?, default_rate=?, color=?, overtime_threshold=?, overtime_multiplier=?, tip_payment=?, employer_id=? WHERE id=?')
+      .run(name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, employer_id, req.params.id);
     res.json({ success: true });
   } catch (e) {
     internalError(res, e);
   }
 });
 
-app.delete('/api/jobs/:id', authMiddleware, (req, res) => {
+app.delete('/api/jobs/:id', authMiddleware, profileRateLimit, (req, res) => {
   const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(req.params.id);
   if (!job) return res.status(404).json({ error: 'Job not found' });
   if (job.user_id !== null && job.user_id !== req.user.id && !req.user.is_admin) {
@@ -1873,23 +1975,32 @@ function getPayPeriodBounds() {
   return { periodStart, periodEnd, prevStart, prevEnd, periodLabel, totalDays, elapsed, remaining };
 }
 
-app.get('/api/paycheck-estimate', authMiddleware, (req, res) => {
+app.get('/api/paycheck-estimate', authMiddleware, profileRateLimit, (req, res) => {
   try {
     const pp = getPayPeriodBounds();
     const from = fmt(pp.periodStart), to = fmt(pp.periodEnd);
     const prevFrom = fmt(pp.prevStart), prevTo = fmt(pp.prevEnd);
 
     const filterUser = resolveUserFilter(req);
-    let sumBase = 'FROM shifts WHERE date >= ? AND date <= ? AND deleted_at IS NULL';
     const userWhere = filterUser !== null
-      ? ` AND user_id IN (${filterUser.map(() => '?').join(',')})`
+      ? ` AND s.user_id IN (${filterUser.map(() => '?').join(',')})`
       : '';
     const userParam = filterUser !== null ? filterUser : [];
 
     // Sum all shifts in the period
-    const sumQuery = `SELECT COALESCE(SUM(wage_total),0) as wages, COALESCE(SUM(total_tips),0) as tips,
-      COALESCE(SUM(grand_total),0) as gross, COALESCE(SUM(hours_worked),0) as hours, COUNT(*) as shifts
-      ${sumBase}${userWhere}`;
+    const sumQuery = `SELECT
+      COALESCE(SUM(s.wage_total),0) as wages,
+      COALESCE(SUM(s.total_tips),0) as tips,
+      COALESCE(SUM(s.grand_total),0) as gross,
+      COALESCE(SUM(s.hours_worked),0) as hours,
+      COUNT(*) as shifts,
+      COALESCE(SUM(CASE WHEN COALESCE(e.no_tax,0)=0 THEN s.wage_total ELSE 0 END),0) as taxable_wages,
+      COALESCE(SUM(CASE WHEN COALESCE(e.no_tax,0)=0 THEN s.total_tips ELSE 0 END),0) as taxable_tips,
+      COALESCE(SUM(CASE WHEN COALESCE(e.no_tax,0)=1 THEN s.grand_total ELSE 0 END),0) as no_tax_income
+      FROM shifts s
+      LEFT JOIN jobs j ON s.job_id = j.id
+      LEFT JOIN employers e ON j.employer_id = e.id
+      WHERE s.date >= ? AND s.date <= ? AND s.deleted_at IS NULL${userWhere}`;
 
     const current = db.prepare(sumQuery).get(from, to, ...userParam);
     const previous = db.prepare(sumQuery).get(prevFrom, prevTo, ...userParam);
@@ -1925,12 +2036,12 @@ app.get('/api/paycheck-estimate', authMiddleware, (req, res) => {
       taxes = db.prepare('SELECT * FROM tax_config WHERE user_id IS NULL AND enabled = 1 ORDER BY sort_order ASC').all();
     }
 
-    // Calculate itemized taxes — taxes apply to ALL income (including cash tips)
+    // Calculate itemized taxes on taxable income only (no_tax employers excluded)
     let totalTax = 0;
     const taxBreakdown = taxes.map(t => {
-      let taxable = t.key === 'tip_tax' ? current.tips : current.wages;
+      let taxable = t.key === 'tip_tax' ? current.taxable_tips : current.taxable_wages;
       if (['federal', 'state', 'social_security', 'medicare'].includes(t.key)) {
-        taxable = current.gross; // wages + all tips
+        taxable = current.taxable_wages + current.taxable_tips;
       }
       const amount = Math.round((taxable * t.rate + t.flat_amount) * 100) / 100;
       totalTax += amount;
@@ -1949,13 +2060,33 @@ app.get('/api/paycheck-estimate', authMiddleware, (req, res) => {
       projectedCashTips = Math.round(tipSplit.cash_tips / pp.elapsed * pp.totalDays * 100) / 100;
       const projectedTotalGross = projectedGross + projectedCashTips;
       const projTax = taxes.reduce((sum, t) => {
-        const allTips = current.tips / pp.elapsed * pp.totalDays;
-        const base = t.key === 'tip_tax' ? allTips : projectedTotalGross;
-        const taxBase = ['federal','state','social_security','medicare'].includes(t.key) ? projectedTotalGross : base;
+        const projectedTaxableWages = current.taxable_wages / pp.elapsed * pp.totalDays;
+        const projectedTaxableTips = current.taxable_tips / pp.elapsed * pp.totalDays;
+        const projectedTaxableTotal = projectedTaxableWages + projectedTaxableTips;
+        const base = t.key === 'tip_tax' ? projectedTaxableTips : projectedTaxableWages;
+        const taxBase = ['federal','state','social_security','medicare'].includes(t.key) ? projectedTaxableTotal : base;
         return sum + taxBase * t.rate + t.flat_amount;
       }, 0);
       projectedNet = Math.round((projectedGross - projTax) * 100) / 100;
     }
+
+    const employerRows = db.prepare(`
+      SELECT
+        COALESCE(e.id, 0) as employer_id,
+        COALESCE(e.name, 'Unassigned') as employer_name,
+        COALESCE(e.no_tax, 0) as no_tax,
+        COUNT(*) as shifts,
+        COALESCE(SUM(s.hours_worked),0) as hours,
+        COALESCE(SUM(s.wage_total),0) as wages,
+        COALESCE(SUM(s.total_tips),0) as tips,
+        COALESCE(SUM(s.grand_total),0) as gross
+      FROM shifts s
+      LEFT JOIN jobs j ON s.job_id = j.id
+      LEFT JOIN employers e ON j.employer_id = e.id
+      WHERE s.date >= ? AND s.date <= ? AND s.deleted_at IS NULL${userWhere}
+      GROUP BY COALESCE(e.id, 0), COALESCE(e.name, 'Unassigned'), COALESCE(e.no_tax, 0)
+      ORDER BY COALESCE(e.name, 'Unassigned') ASC
+    `).all(from, to, ...userParam);
 
     res.json({
       period: {
@@ -1969,6 +2100,10 @@ app.get('/api/paycheck-estimate', authMiddleware, (req, res) => {
       current: {
         wages: current.wages,
         tips: current.tips,
+        taxable_wages: current.taxable_wages,
+        taxable_tips: current.taxable_tips,
+        taxable_gross: current.taxable_wages + current.taxable_tips,
+        no_tax_income: current.no_tax_income,
         cash_tips: tipSplit.cash_tips,
         paycheck_tips: tipSplit.paycheck_tips,
         gross: current.gross,
@@ -1987,6 +2122,7 @@ app.get('/api/paycheck-estimate', authMiddleware, (req, res) => {
       projected_gross: projectedGross,
       projected_net: projectedNet,
       projected_cash_tips: projectedCashTips,
+      employers: employerRows,
     });
   } catch (e) {
     internalError(res, e);
@@ -2322,23 +2458,36 @@ app.get('/api/tax-estimate', authMiddleware, (req, res) => {
   else { from = fmt(bounds.ytdStart); to = fmt(bounds.now); }
 
   const filterUser = resolveUserFilter(req);
-  let taxWhere = 'date >= ? AND date <= ? AND deleted_at IS NULL';
+  let taxWhere = 's.date >= ? AND s.date <= ? AND s.deleted_at IS NULL';
   const taxParams = [from, to];
-  taxWhere = appendUserFilter(taxWhere, taxParams, filterUser);
+  taxWhere = appendUserFilter(taxWhere, taxParams, filterUser, 's.user_id');
 
   const data = db.prepare(`
-    SELECT COALESCE(SUM(wage_total),0) as wages, COALESCE(SUM(total_tips),0) as tips, COALESCE(SUM(grand_total),0) as total
-    FROM shifts WHERE ${taxWhere}
+    SELECT
+      COALESCE(SUM(s.wage_total),0) as wages,
+      COALESCE(SUM(s.total_tips),0) as tips,
+      COALESCE(SUM(s.grand_total),0) as total,
+      COALESCE(SUM(CASE WHEN COALESCE(e.no_tax,0)=0 THEN s.wage_total ELSE 0 END),0) as taxable_wages,
+      COALESCE(SUM(CASE WHEN COALESCE(e.no_tax,0)=0 THEN s.total_tips ELSE 0 END),0) as taxable_tips
+    FROM shifts s
+    LEFT JOIN jobs j ON s.job_id = j.id
+    LEFT JOIN employers e ON j.employer_id = e.id
+    WHERE ${taxWhere}
   `).get(...taxParams);
+
+  const taxableTotal = data.taxable_wages + data.taxable_tips;
 
   res.json({
     period: period || 'ytd',
     wages: data.wages,
     tips: data.tips,
     total: data.total,
-    est_wage_tax: Math.round(data.wages * wageRate * 100) / 100,
-    est_tip_tax: Math.round(data.tips * tipRate * 100) / 100,
-    est_total_tax: Math.round((data.wages * wageRate + data.tips * tipRate) * 100) / 100,
+    taxable_wages: data.taxable_wages,
+    taxable_tips: data.taxable_tips,
+    taxable_total: taxableTotal,
+    est_wage_tax: Math.round(data.taxable_wages * wageRate * 100) / 100,
+    est_tip_tax: Math.round(data.taxable_tips * tipRate * 100) / 100,
+    est_total_tax: Math.round((data.taxable_wages * wageRate + data.taxable_tips * tipRate) * 100) / 100,
     wage_rate: wageRate,
     tip_rate: tipRate,
   });

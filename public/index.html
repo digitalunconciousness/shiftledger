@@ -478,11 +478,22 @@ canvas{max-height:280px}
       </div>
       <!-- Manage Jobs (all users) -->
       <div class="card" style="margin-bottom:20px">
+        <div class="card-label" style="margin-bottom:12px">My Employers</div>
+        <div id="employers-list"></div>
+        <div class="divider"></div>
+        <div class="form-grid">
+          <div class="form-group"><label>Employer Name</label><input id="ne-name"></div>
+          <div class="form-group"><label>No Tax</label><div style="display:flex;align-items:center;height:42px"><input type="checkbox" id="ne-no-tax"></div></div>
+          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addEmployer()">Add Employer</button></div>
+        </div>
+      </div>
+      <div class="card" style="margin-bottom:20px">
         <div class="card-label" style="margin-bottom:12px">My Jobs</div>
         <div id="jobs-list"></div>
         <div class="divider"></div>
         <div class="form-grid">
           <div class="form-group"><label>Job Name</label><input id="nj-name"></div>
+          <div class="form-group"><label>Employer (optional)</label><select id="nj-employer" style="height:42px"><option value="">— No Employer —</option></select></div>
           <div class="form-group"><label>Default Rate</label><input type="number" id="nj-rate" step="0.25" min="0" placeholder="0.00"></div>
           <div class="form-group"><label>Color</label><input type="color" id="nj-color" value="#f5a623" style="height:42px;padding:4px"></div>
           <div class="form-group"><label>Tips Paid As</label><select id="nj-tip-payment" style="height:42px"><option value="cash">Cash (Nightly)</option><option value="paycheck">On Paycheck</option></select></div>
@@ -691,6 +702,7 @@ canvas{max-height:280px}
       <div class="form-group"><label>Job Name</label><input id="ej-name"></div>
       <div class="form-group"><label>Default Rate ($)</label><input type="number" id="ej-rate" step="0.25" min="0"></div>
       <div class="form-group"><label>Color</label><input type="color" id="ej-color" style="height:42px;padding:4px"></div>
+      <div class="form-group"><label>Employer (optional)</label><select id="ej-employer" style="height:42px"><option value="">— No Employer —</option></select></div>
       <div class="form-group"><label>OT Threshold (hrs/wk)</label><input type="number" id="ej-ot-threshold" step="1" min="0" value="40"></div>
       <div class="form-group"><label>OT Multiplier</label><input type="number" id="ej-ot-multiplier" step="0.1" min="1" value="1.5"></div>
       <div class="form-group"><label>Tips Paid As</label><select id="ej-tip-payment" style="height:42px"><option value="cash">Cash (Nightly)</option><option value="paycheck">On Paycheck</option></select></div>
@@ -750,6 +762,7 @@ let currentPeriod='month';
 let dashFilterUser='mine';
 let histFilterUser='mine';
 let jobsCache=[];
+let employersCache=[];
 let templatesCache=[];
 
 // ── Init ──
@@ -814,7 +827,7 @@ function enterApp(){
   loadAppSettings();
   document.getElementById('f-date').value=today();
   if(currentUser.is_admin) document.getElementById('admin-section').style.display='block';
-  loadJobs();loadTemplates();
+  loadEmployers();loadJobs();loadTemplates();
   // tip mode label
   document.querySelectorAll('input[name="tip-mode"]').forEach(r=>r.addEventListener('change',()=>{
     document.getElementById('tip-label').textContent=r.value==='per_hour'?'Tips Per Hour ($)':'Total Tips for Night ($)';
@@ -878,9 +891,16 @@ function updatePreview(){
 // ── Jobs ──
 async function loadJobs(){
   jobsCache=await fetch('/api/jobs').then(r=>r.json());
-  const opts='<option value="">— No Job —</option>'+jobsCache.filter(j=>!j.archived).map(j=>`<option value="${j.id}">${esc(j.name)}</option>`).join('');
+  const opts='<option value="">— No Job —</option>'+jobsCache.filter(j=>!j.archived).map(j=>`<option value="${j.id}">${esc(j.employer_name?`${j.employer_name} — ${j.name}`:j.name)}</option>`).join('');
   $('f-job').innerHTML=opts;
   $('e-job').innerHTML=opts;
+}
+
+async function loadEmployers(){
+  employersCache=await fetch('/api/employers').then(r=>r.json());
+  const opts='<option value="">— No Employer —</option>'+employersCache.filter(e=>!e.archived).map(e=>`<option value="${e.id}">${esc(e.name)}${e.no_tax?' (No Tax)':''}</option>`).join('');
+  const ne=$('nj-employer'); if(ne) ne.innerHTML=opts;
+  const ee=$('ej-employer'); if(ee) ee.innerHTML=opts;
 }
 
 function onJobChange(){
@@ -1064,7 +1084,7 @@ function renderExtraCards(ot,tax){
   let html='';
   if(ot.is_overtime) html+=`<div class="card"><div class="card-label">⚠ Overtime This Week</div><div class="card-value">${ot.overtime_hours.toFixed(1)} hrs</div><div class="card-sub">${ot.total_hours.toFixed(1)} total · ${ot.threshold}hr threshold · ${ot.multiplier}x rate</div></div>`;
   else html+=`<div class="card"><div class="card-label">Weekly Hours</div><div class="card-value">${ot.total_hours.toFixed(1)} hrs</div><div class="card-sub">${ot.threshold - ot.total_hours > 0 ? (ot.threshold - ot.total_hours).toFixed(1)+' hrs until OT' : 'At threshold'}</div></div>`;
-  html+=`<div class="card"><div class="card-label">Est. Taxes (YTD)</div><div class="card-value">$${tax.est_total_tax.toFixed(2)}</div><div class="card-sub">Wage tax: $${tax.est_wage_tax.toFixed(2)} · Tip tax: $${tax.est_tip_tax.toFixed(2)}</div></div>`;
+  html+=`<div class="card"><div class="card-label">Est. Taxes (YTD)</div><div class="card-value">$${tax.est_total_tax.toFixed(2)}</div><div class="card-sub">Taxable: $${tax.taxable_total.toFixed(2)} · Wage tax: $${tax.est_wage_tax.toFixed(2)} · Tip tax: $${tax.est_tip_tax.toFixed(2)}</div></div>`;
   $('extra-cards').innerHTML=html;
 }
 
@@ -1232,8 +1252,8 @@ async function loadSettings(){
     $('set-name').value=currentUser.display_name;$('set-color').value=currentUser.color;
   }
 
-  // Load jobs, goals, tax config for all users
-  loadJobsList();loadGoalsList();loadTaxConfig();loadHouseholds();
+  // Load employers, jobs, goals, tax config for all users
+  loadEmployersList();loadJobsList();loadGoalsList();loadTaxConfig();loadHouseholds();
   if(currentUser.is_admin){
     loadUsersList();loadAuditLog();
     const s=await loadAppSettings();
@@ -1488,6 +1508,10 @@ function renderPaycheckCard(p){
   const prevDiff=p.previous.gross>0?((p.current.gross-p.previous.gross)/p.previous.gross*100).toFixed(1):null;
   const cmpHtml=prevDiff!==null?`<span style="color:${parseFloat(prevDiff)>=0?'var(--green)':'var(--red)'}">${parseFloat(prevDiff)>=0?'↑':'↓'}${Math.abs(prevDiff)}% vs prev</span>`:'';
   const taxRows=p.taxes.map(t=>`<div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:.8rem;padding:2px 0"><span style="color:var(--text-mute)">${esc(t.label)} (${(t.rate*100).toFixed(1)}%)</span><span>-$${t.amount.toFixed(2)}</span></div>`).join('');
+  const employerRows=(p.employers||[]).map(e=>{
+    const taxBadge=e.no_tax?'<span style="color:var(--green)">No Tax</span>':'<span style="color:var(--text-mute)">Taxable</span>';
+    return `<div class="card"><div class="card-label">${esc(e.employer_name)}</div><div class="card-value">$${e.gross.toFixed(2)}</div><div class="card-sub">${e.shifts} shift${e.shifts!==1?'s':''} · ${e.hours.toFixed(1)} hrs · ${taxBadge}</div></div>`;
+  }).join('');
   $('paycheck-card').innerHTML=`
     <div class="chart-card" style="margin-bottom:24px">
       <div class="chart-title" style="margin-bottom:4px">PAYCHECK ESTIMATE · ${esc(p.period.type)}</div>
@@ -1500,7 +1524,9 @@ function renderPaycheckCard(p){
       ${p.current.cash_tips>0?`<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--surface);border-radius:8px;margin-bottom:16px;font-family:var(--mono);font-size:.85rem"><span>💵 Cash Tips (already received)</span><span style="color:var(--green);font-weight:600">$${p.current.cash_tips.toFixed(2)}</span></div>`:''}
       <div class="summary-grid" style="margin-bottom:16px">
         <div class="card"><div class="card-label">Total Earnings</div><div class="card-value" style="color:var(--green)">$${(p.net_pay+p.current.cash_tips).toFixed(2)}</div><div class="card-sub">Net paycheck + cash tips</div></div>
+        <div class="card"><div class="card-label">Taxable Income</div><div class="card-value">$${p.current.taxable_gross.toFixed(2)}</div><div class="card-sub">No-tax income: $${p.current.no_tax_income.toFixed(2)}</div></div>
       </div>
+      ${employerRows?`<div class="chart-title" style="margin:8px 0 10px 0">PAYCHECKS BY EMPLOYER</div><div class="summary-grid" style="margin-bottom:16px">${employerRows}</div>`:''}
       <details style="cursor:pointer"><summary style="font-size:.8rem;font-family:var(--mono);color:var(--text-mute);margin-bottom:8px">Tax Breakdown</summary>${taxRows}</details>
       <div style="font-size:.65rem;color:var(--text-mute);font-family:var(--mono);margin-top:12px;font-style:italic">Estimates are for budgeting only — not tax advice.</div>
     </div>`;
@@ -1632,20 +1658,66 @@ async function loadJobsList(){
   $('jobs-list').innerHTML=jobs.map(j=>{
     const isOwner=!j.user_id||j.user_id===currentUser.id||currentUser.is_admin;
     const ownerLabel=j.user_id===null?'<span style="font-size:.65rem;color:var(--amber);font-family:var(--mono);margin-left:4px">global</span>':'';
+    const employerLabel=j.employer_name?` · Employer: ${esc(j.employer_name)}${j.employer_no_tax?' (No Tax)':''}`:' · Employer: None';
     return `<div class="user-card"><span class="user-dot" style="background:${j.color}"></span>
-    <div class="user-info"><strong>${esc(j.name)}</strong>${ownerLabel}<small>$${j.default_rate.toFixed(2)}/hr · OT ${j.overtime_threshold||40}h @ ${j.overtime_multiplier||1.5}x · Tips: ${j.tip_payment==='paycheck'?'Paycheck':'Cash'}${j.archived?' · Archived':''}</small></div>
+    <div class="user-info"><strong>${esc(j.name)}</strong>${ownerLabel}<small>$${j.default_rate.toFixed(2)}/hr · OT ${j.overtime_threshold||40}h @ ${j.overtime_multiplier||1.5}x · Tips: ${j.tip_payment==='paycheck'?'Paycheck':'Cash'}${employerLabel}${j.archived?' · Archived':''}</small></div>
     <div style="display:flex;gap:6px">
       ${!j.archived&&isOwner?`<button class="btn btn-ghost btn-sm" onclick="editJob(${j.id})">Edit</button><button class="btn btn-danger btn-sm" onclick="deleteJob(${j.id},'${j.name.replace(/'/g,"\\'")}')">Delete</button>`:'<small style="opacity:.5">'+(j.archived?'Archived':'Read-only')+'</small>'}
     </div></div>`;
   }).join('');
 }
 
+async function loadEmployersList(){
+  const employers=await fetch('/api/employers').then(r=>r.json());
+  $('employers-list').innerHTML=employers.map(e=>{
+    const canEdit=e.user_id===currentUser.id||currentUser.is_admin;
+    const jsonName=JSON.stringify(e.name);
+    return `<div class="user-card"><div class="user-info"><strong>${esc(e.name)}</strong><small>${e.no_tax?'No Tax (excluded from tax estimates)':'Taxable employer'}</small></div>
+    <div style="display:flex;gap:6px">${canEdit?`<button class="btn btn-ghost btn-sm" onclick='editEmployer(${e.id},${jsonName},${e.no_tax?1:0})'>Edit</button><button class="btn btn-danger btn-sm" onclick='deleteEmployer(${e.id},${jsonName})'>Delete</button>`:''}</div></div>`;
+  }).join('')||'<p class="empty">No employers yet.</p>';
+  loadEmployers();
+}
+
+async function addEmployer(){
+  const name=gv('ne-name');
+  const no_tax=$('ne-no-tax').checked;
+  if(!name){toast('Enter employer name','error');return}
+  const res=await fetch('/api/employers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,no_tax})});
+  if(!res.ok){const d=await res.json();toast(d.error||'Failed to add employer','error');return}
+  sv('ne-name','');$('ne-no-tax').checked=false;
+  toast('Employer added','success');
+  loadEmployersList();loadJobsList();loadJobs();
+}
+
+async function editEmployer(id,name,noTax){
+  const nextName=prompt('Employer name:',name);
+  if(nextName===null)return;
+  const noTaxInput=prompt(`No Tax for "${nextName.trim()}"? Enter "yes" or "no".`,noTax?'yes':'no');
+  if(noTaxInput===null)return;
+  const normalized=(noTaxInput||'').trim().toLowerCase();
+  if(!['yes','no','y','n'].includes(normalized)){toast('Enter yes or no','error');return}
+  const nextNoTax=['yes','y'].includes(normalized);
+  const res=await fetch('/api/employers/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:nextName.trim(),no_tax:nextNoTax})});
+  if(!res.ok){const d=await res.json();toast(d.error||'Failed to update employer','error');return}
+  toast('Employer updated','success');
+  loadEmployersList();loadJobsList();loadJobs();loadDashboard();
+}
+
+async function deleteEmployer(id,name){
+  if(!confirm('Delete employer "'+name+'"? Jobs will be kept but unassigned from employer.'))return;
+  const res=await fetch('/api/employers/'+id,{method:'DELETE'});
+  if(!res.ok){const d=await res.json();toast(d.error||'Failed to delete employer','error');return}
+  toast('Employer deleted','success');
+  loadEmployersList();loadJobsList();loadJobs();loadDashboard();
+}
+
 async function addJob(){
-  const body={name:gv('nj-name'),default_rate:parseFloat(gv('nj-rate'))||0,color:gv('nj-color'),tip_payment:gv('nj-tip-payment')||'cash'};
+  const employerValue=gv('nj-employer');
+  const body={name:gv('nj-name'),employer_id:employerValue===''?null:parseInt(employerValue,10),default_rate:parseFloat(gv('nj-rate'))||0,color:gv('nj-color'),tip_payment:gv('nj-tip-payment')||'cash'};
   if(!body.name){toast('Enter job name','error');return}
   const res=await fetch('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(!res.ok){const d=await res.json();toast(d.error||'Failed to add job','error');return}
-  sv('nj-name','');sv('nj-rate','');toast('Job added','success');loadJobsList();loadJobs();
+  sv('nj-name','');sv('nj-employer','');sv('nj-rate','');toast('Job added','success');loadJobsList();loadJobs();
 }
 
 async function editJob(id){
@@ -1654,6 +1726,7 @@ async function editJob(id){
   if(!j){toast('Job not found','error');return}
   sv('ej-id',j.id);sv('ej-name',j.name);setDecimalValue('ej-rate',j.default_rate);
   $('ej-color').value=j.color||'#f5a623';
+  sv('ej-employer',j.employer_id||'');
   setDecimalValue('ej-ot-threshold',j.overtime_threshold||40);setDecimalValue('ej-ot-multiplier',j.overtime_multiplier||1.5);$('ej-tip-payment').value=j.tip_payment||'cash';
   $('job-edit-modal').classList.add('open');
 }
@@ -1662,8 +1735,9 @@ function closeJobModal(){$('job-edit-modal').classList.remove('open')}
 
 async function saveJobEdit(){
   const id=gv('ej-id');
+  const employerValue=gv('ej-employer');
   const body={name:gv('ej-name'),default_rate:parseFloat(gv('ej-rate'))||0,color:$('ej-color').value,
-    overtime_threshold:parseFloat(gv('ej-ot-threshold'))||40,overtime_multiplier:parseFloat(gv('ej-ot-multiplier'))||1.5,tip_payment:$('ej-tip-payment').value||'cash'};
+    employer_id:employerValue===''?null:parseInt(employerValue,10),overtime_threshold:parseFloat(gv('ej-ot-threshold'))||40,overtime_multiplier:parseFloat(gv('ej-ot-multiplier'))||1.5,tip_payment:$('ej-tip-payment').value||'cash'};
   if(!body.name){toast('Job name is required','error');return}
   const res=await fetch('/api/jobs/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(!res.ok){const d=await res.json();toast(d.error||'Failed to update job','error');return}
