@@ -313,7 +313,7 @@ canvas{max-height:280px}
     <div class="nav-item" data-view="dashboard" onclick="navigate(this)" role="button" tabindex="0">
       <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Dashboard
     </div>
-    <div class="nav-item" onclick="openTipCalcModal()" role="button" tabindex="0" aria-label="Open tip calculator">
+    <div class="nav-item" onclick="openTipCalcModal()" role="button" tabindex="0" aria-label="Tip Calculator">
       <span aria-hidden="true">🧮</span>Tip Calculator
     </div>
     <div class="nav-section">Data</div>
@@ -995,8 +995,8 @@ function calculateTipouts(totalTips,employees){
   if(!workedEmployees.length) throw new Error('Add at least one employee with hours greater than 0.');
   const totalHours=workedEmployees.reduce((sum,e)=>sum+e.hours,0);
   const tipPerHour=truncateToTwoDec(totalTips/totalHours);
-  const calculatedEmployees=workedEmployees.map((employee,index)=>({
-    name:employee.name||`Employee ${index+1}`,
+  const calculatedEmployees=workedEmployees.map(employee=>({
+    name:employee.name||'Unnamed Employee',
     hours:employee.hours,
     tipPerHour,
     tipout:truncateToTwoDec(employee.hours*tipPerHour)
@@ -1023,7 +1023,7 @@ function renderTipCalculatorResult(result){
   return `
     <div class="tipcalc-result">
       <div class="tipcalc-meta">
-        <div class="tipcalc-meta-card"><div class="label">Total Tips (Rounded)</div><div class="value">$${result.totalTipsRounded}</div></div>
+        <div class="tipcalc-meta-card"><div class="label">Total Tips (Rounded to Whole Dollar)</div><div class="value">$${result.totalTipsRounded}</div></div>
         <div class="tipcalc-meta-card"><div class="label">Tip Per Hour</div><div class="value">${formatTruncatedMoney(result.tipPerHour)}/hr</div></div>
       </div>
       <div class="table-wrap">
