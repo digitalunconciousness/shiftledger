@@ -265,6 +265,39 @@ function migrate() {
         }
       }
     },
+    // v12: audit_log and password_history tables
+    () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS audit_log (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          actor_id    INTEGER NOT NULL REFERENCES users(id),
+          target_id   INTEGER NOT NULL REFERENCES users(id),
+          action      TEXT    NOT NULL,
+          detail      TEXT    DEFAULT '',
+          created_at  TEXT    DEFAULT (datetime('now'))
+        )
+      `);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS password_history (
+          id            INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          password_hash TEXT    NOT NULL,
+          created_at    TEXT    DEFAULT (datetime('now'))
+        )
+      `);
+    },
+    // v13: assign legacy NULL user_id rows to the first admin user
+    // Shifts, jobs, templates, and goals created before user accounts existed have user_id = NULL.
+    // Assigning them to the first admin prevents them leaking into every user's data views.
+    () => {
+      const admin = db.prepare('SELECT id FROM users WHERE is_admin = 1 ORDER BY id ASC LIMIT 1').get();
+      if (admin) {
+        db.prepare('UPDATE shifts    SET user_id = ? WHERE user_id IS NULL').run(admin.id);
+        db.prepare('UPDATE jobs      SET user_id = ? WHERE user_id IS NULL').run(admin.id);
+        db.prepare('UPDATE templates SET user_id = ? WHERE user_id IS NULL').run(admin.id);
+        db.prepare('UPDATE goals     SET user_id = ? WHERE user_id IS NULL').run(admin.id);
+      }
+    },
   ];
 
   const tx = db.transaction(() => {
@@ -294,9 +327,8 @@ function getVisibleUserIds(userId) {
 }
 
 // Returns an array of user IDs to filter by, or null to show all users' data.
-// Non-admins always see their own + household members' data.
 // Admins can pass user_id=all (all data) or user_id=<id> (specific user).
-// Omitting user_id defaults to current user for both roles.
+// Non-admins: pass user_id=<own_id> for strictly personal data; omit for self + household.
 function resolveUserFilter(req) {
   const param = req.query.user_id;
   if (req.user && req.user.is_admin) {
@@ -305,6 +337,8 @@ function resolveUserFilter(req) {
     return [req.user.id];
   }
   if (!req.user) return null;
+  // Non-admin: if the caller explicitly requests their own ID, return only them.
+  if (param && parseInt(param, 10) === req.user.id) return [req.user.id];
   return getVisibleUserIds(req.user.id);
 }
 
@@ -416,6 +450,22 @@ function getUserCount() {
   return db.prepare('SELECT COUNT(*) as c FROM users').get().c;
 }
 
+// Check if a plaintext password matches any of the last 5 stored hashes for a user
+async function isPasswordInHistory(userId, plaintext) {
+  const history = db.prepare('SELECT password_hash FROM password_history WHERE user_id = ? ORDER BY created_at DESC LIMIT 5').all(userId);
+  for (const h of history) {
+    if (await verifyPassword(plaintext, h.password_hash)) return true;
+  }
+  return false;
+}
+
+// Keep only the 5 most recent password history entries for a user
+function prunePasswordHistory(userId) {
+  db.prepare(`DELETE FROM password_history WHERE user_id = ? AND id NOT IN (
+    SELECT id FROM password_history WHERE user_id = ? ORDER BY created_at DESC LIMIT 5
+  )`).run(userId, userId);
+}
+
 // Simple in-memory rate limiter (no extra dependencies).
 // windowMs: sliding window in ms. maxRequests: max allowed per window per IP.
 function createRateLimiter(windowMs, maxRequests) {
@@ -449,6 +499,7 @@ function createRateLimiter(windowMs, maxRequests) {
 
 // Rate limiters for sensitive auth endpoints
 const authRateLimit = createRateLimiter(15 * 60 * 1000, 20); // 20 requests per 15 min
+const passwordChangeRateLimit = createRateLimiter(15 * 60 * 1000, 5); // 5 password changes per 15 min
 // General API rate limiter
 const apiRateLimit = createRateLimiter(60 * 1000, 120); // 120 requests per minute per IP
 
@@ -559,6 +610,19 @@ const RegisterSchema = z.object({
 const LoginSchema = z.object({
   username: z.string(),
   password: z.string(),
+});
+
+const ChangePasswordSchema = z.object({
+  current_password: z.string().min(1),
+  new_password: z.string().min(8).max(200)
+    .regex(/[A-Za-z]/, 'must contain at least one letter')
+    .regex(/[0-9!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?`~]/, 'must contain at least one number or special character'),
+});
+
+const AdminResetPasswordSchema = z.object({
+  new_password: z.string().min(8).max(200)
+    .regex(/[A-Za-z]/, 'must contain at least one letter')
+    .regex(/[0-9!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?`~]/, 'must contain at least one number or special character'),
 });
 
 function validate(schema) {
@@ -783,13 +847,9 @@ app.put('/api/users/:id', authMiddleware, async (req, res) => {
     const isAdmin = req.user && req.user.is_admin;
     if (!isOwnProfile && !isAdmin) return res.status(403).json({ error: 'Forbidden' });
 
-    const { display_name, color, password, is_admin } = req.body;
+    const { display_name, color, is_admin } = req.body;
     if (display_name) db.prepare('UPDATE users SET display_name = ? WHERE id = ?').run(display_name, targetId);
     if (color) db.prepare('UPDATE users SET color = ? WHERE id = ?').run(color, targetId);
-    if (password) {
-      const pw = await hashPassword(password);
-      db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(pw, targetId);
-    }
     if (isAdmin && is_admin !== undefined) {
       db.prepare('UPDATE users SET is_admin = ? WHERE id = ?').run(is_admin ? 1 : 0, targetId);
     }
@@ -925,6 +985,85 @@ app.delete('/api/households/:id/members/:userId', authMiddleware, (req, res) => 
   const remaining = db.prepare('SELECT COUNT(*) as c FROM household_members WHERE household_id = ?').get(householdId).c;
   if (remaining === 0) db.prepare('DELETE FROM households WHERE id = ?').run(householdId);
   res.json({ success: true });
+});
+
+// POST /api/auth/change-password — authenticated user changes their own password
+app.post('/api/auth/change-password', authMiddleware, passwordChangeRateLimit, validate(ChangePasswordSchema), async (req, res) => {
+  try {
+    const { current_password, new_password } = req.validated;
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const valid = await verifyPassword(current_password, user.password_hash);
+    if (!valid) return res.status(401).json({ error: 'Current password is incorrect' });
+
+    if (await isPasswordInHistory(user.id, new_password)) {
+      return res.status(400).json({ error: 'Cannot reuse a recent password' });
+    }
+
+    const newHash = await hashPassword(new_password);
+    db.prepare('INSERT INTO password_history (user_id, password_hash) VALUES (?, ?)').run(user.id, user.password_hash);
+    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(newHash, user.id);
+    prunePasswordHistory(user.id);
+
+    // Invalidate all sessions for this user
+    db.prepare('DELETE FROM sessions WHERE user_id = ?').run(user.id);
+
+    res.setHeader('Set-Cookie', 'sl_session=; Path=/; HttpOnly; Max-Age=0');
+    res.json({ success: true, message: 'Password changed. Please log in again.' });
+  } catch (e) {
+    logger.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/users/:id/reset-password — admin resets another user's password
+app.post('/api/users/:id/reset-password', authMiddleware, adminOnly, passwordChangeRateLimit, validate(AdminResetPasswordSchema), async (req, res) => {
+  try {
+    const targetId = parseInt(req.params.id, 10);
+    const target = db.prepare('SELECT * FROM users WHERE id = ?').get(targetId);
+    if (!target) return res.status(404).json({ error: 'User not found' });
+
+    const { new_password } = req.validated;
+
+    if (await isPasswordInHistory(targetId, new_password)) {
+      return res.status(400).json({ error: 'Cannot reuse a recent password for this user' });
+    }
+
+    const newHash = await hashPassword(new_password);
+    db.prepare('INSERT INTO password_history (user_id, password_hash) VALUES (?, ?)').run(targetId, target.password_hash);
+    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(newHash, targetId);
+    prunePasswordHistory(targetId);
+
+    // Invalidate all sessions for the target user
+    db.prepare('DELETE FROM sessions WHERE user_id = ?').run(targetId);
+
+    // Log admin action
+    db.prepare('INSERT INTO audit_log (actor_id, target_id, action, detail) VALUES (?, ?, ?, ?)').run(
+      req.user.id, targetId, 'admin_password_reset',
+      `Admin ${req.user.username} reset password for user ${target.username}`
+    );
+    logger.info({ actor: req.user.username, target: target.username, action: 'admin_password_reset' });
+
+    res.json({ success: true, message: `Password reset for ${target.username}. Their sessions have been invalidated.` });
+  } catch (e) {
+    logger.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/audit-log — admin views audit log
+app.get('/api/audit-log', authMiddleware, adminOnly, authRateLimit, (req, res) => {
+  const rows = db.prepare(`
+    SELECT al.id, al.action, al.detail, al.created_at,
+           a.username as actor_username, a.display_name as actor_display_name,
+           t.username as target_username, t.display_name as target_display_name
+    FROM audit_log al
+    JOIN users a ON al.actor_id = a.id
+    JOIN users t ON al.target_id = t.id
+    ORDER BY al.created_at DESC LIMIT 100
+  `).all();
+  res.json(rows);
 });
 
 // ── Shift Routes (all require auth) ─────────────────────────────────────────
