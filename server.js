@@ -319,6 +319,13 @@ function migrate() {
         db.exec("UPDATE household_members SET role = 'admin' WHERE EXISTS (SELECT 1 FROM households h WHERE h.id = household_members.household_id AND h.created_by = household_members.user_id)");
       }
     },
+    // v15: per-job tip calculator save behavior
+    () => {
+      const cols = db.prepare('PRAGMA table_info(jobs)').all().map(c => c.name);
+      if (!cols.includes('tip_calc_round')) {
+        db.exec('ALTER TABLE jobs ADD COLUMN tip_calc_round INTEGER NOT NULL DEFAULT 0');
+      }
+    },
   ];
 
   const tx = db.transaction(() => {
@@ -596,6 +603,7 @@ const JobSchema = z.object({
   overtime_threshold: z.number().min(0).optional().default(40),
   overtime_multiplier: z.number().min(1).optional().default(1.5),
   tip_payment: z.enum(['cash', 'paycheck']).optional().default('cash'),
+  tip_calc_round: z.boolean().optional().default(false),
 });
 
 const TemplateSchema = z.object({
@@ -1346,11 +1354,11 @@ app.get('/api/jobs', authMiddleware, (req, res) => {
 
 app.post('/api/jobs', authMiddleware, validate(JobSchema), (req, res) => {
   try {
-    const { name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment } = req.validated;
+    const { name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, tip_calc_round } = req.validated;
     const userId = req.user ? req.user.id : null;
-    const result = db.prepare('INSERT INTO jobs (name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, user_id) VALUES (?,?,?,?,?,?,?)')
-      .run(name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, userId);
-    res.json({ id: result.lastInsertRowid, name, default_rate, color, tip_payment, user_id: userId });
+    const result = db.prepare('INSERT INTO jobs (name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, tip_calc_round, user_id) VALUES (?,?,?,?,?,?,?,?)')
+      .run(name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, tip_calc_round ? 1 : 0, userId);
+    res.json({ id: result.lastInsertRowid, name, default_rate, color, tip_payment, tip_calc_round: tip_calc_round ? 1 : 0, user_id: userId });
   } catch (e) {
     internalError(res, e);
   }
@@ -1367,9 +1375,9 @@ app.put('/api/jobs/:id', authMiddleware, validate(JobSchema), (req, res) => {
     if (job.user_id === null && !req.user.is_admin) {
       return res.status(403).json({ error: 'Only admins can edit global jobs' });
     }
-    const { name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment } = req.validated;
-    db.prepare('UPDATE jobs SET name=?, default_rate=?, color=?, overtime_threshold=?, overtime_multiplier=?, tip_payment=? WHERE id=?')
-      .run(name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, req.params.id);
+    const { name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, tip_calc_round } = req.validated;
+    db.prepare('UPDATE jobs SET name=?, default_rate=?, color=?, overtime_threshold=?, overtime_multiplier=?, tip_payment=?, tip_calc_round=? WHERE id=?')
+      .run(name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, tip_calc_round ? 1 : 0, req.params.id);
     res.json({ success: true });
   } catch (e) {
     internalError(res, e);
