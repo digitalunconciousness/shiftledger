@@ -712,6 +712,20 @@ canvas{max-height:280px}
   </div>
 </div>
 
+<!-- Employer Edit Modal -->
+<div class="modal-overlay" id="employer-edit-modal" role="dialog" aria-modal="true" aria-labelledby="employer-modal-title">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title" id="employer-modal-title">Edit Employer</span><button class="close-btn" onclick="closeEmployerModal()" aria-label="Close edit employer dialog"><span aria-hidden="true">&times;</span></button></div>
+    <div class="form-grid">
+      <input type="hidden" id="ee-id">
+      <div class="form-group"><label>Employer Name</label><input id="ee-name"></div>
+      <div class="form-group"><label>No Tax</label><div style="display:flex;align-items:center;height:42px"><input type="checkbox" id="ee-no-tax"></div></div>
+    </div>
+    <div class="divider"></div>
+    <div style="display:flex;gap:10px"><button class="btn btn-primary" onclick="saveEmployerEdit()">Save</button><button class="btn btn-ghost" onclick="closeEmployerModal()">Cancel</button></div>
+  </div>
+</div>
+
 <!-- Admin: Edit User Profile Modal -->
 <div class="modal-overlay" id="user-edit-modal" role="dialog" aria-modal="true" aria-labelledby="user-modal-title">
   <div class="modal">
@@ -846,6 +860,7 @@ function setDecimalValue(id,value,digits=2){if(value===null||value===undefined||
 function formatDecimalInput(input,digits=2){if(!input||input.value==='')return;const number=Number(input.value);if(!Number.isFinite(number))return;input.value=number.toFixed(digits)}
 function attachDecimalInput(id,digits=2){const input=$(id);if(!input)return;input.addEventListener('blur',()=>formatDecimalInput(input,digits))}
 function setupDecimalInputs(){['f-rate','f-hours','f-tips','e-rate','e-hours','e-tips','nj-rate','ng-amount','ntc-rate','ntc-flat','ej-rate','ej-ot-threshold','ej-ot-multiplier'].forEach(id=>attachDecimalInput(id,2))}
+function formatJobDisplayName(job){return job.employer_name?`${job.employer_name} — ${job.name}`:job.name}
 
 // ── Navigation ──
 const viewKeys=['log','dashboard','history','reports','settings'];
@@ -891,7 +906,7 @@ function updatePreview(){
 // ── Jobs ──
 async function loadJobs(){
   jobsCache=await fetch('/api/jobs').then(r=>r.json());
-  const opts='<option value="">— No Job —</option>'+jobsCache.filter(j=>!j.archived).map(j=>`<option value="${j.id}">${esc(j.employer_name?`${j.employer_name} — ${j.name}`:j.name)}</option>`).join('');
+  const opts='<option value="">— No Job —</option>'+jobsCache.filter(j=>!j.archived).map(j=>`<option value="${j.id}">${esc(formatJobDisplayName(j))}</option>`).join('');
   $('f-job').innerHTML=opts;
   $('e-job').innerHTML=opts;
 }
@@ -1673,7 +1688,7 @@ async function loadEmployersList(){
     const canEdit=e.user_id===currentUser.id||currentUser.is_admin;
     const jsonName=JSON.stringify(e.name);
     return `<div class="user-card"><div class="user-info"><strong>${esc(e.name)}</strong><small>${e.no_tax?'No Tax (excluded from tax estimates)':'Taxable employer'}</small></div>
-    <div style="display:flex;gap:6px">${canEdit?`<button class="btn btn-ghost btn-sm" onclick='editEmployer(${e.id},${jsonName},${e.no_tax?1:0})'>Edit</button><button class="btn btn-danger btn-sm" onclick='deleteEmployer(${e.id},${jsonName})'>Delete</button>`:''}</div></div>`;
+    <div style="display:flex;gap:6px">${canEdit?`<button class="btn btn-ghost btn-sm" onclick='openEmployerModal(${e.id},${jsonName},${e.no_tax?1:0})'>Edit</button><button class="btn btn-danger btn-sm" onclick='deleteEmployer(${e.id},${jsonName})'>Delete</button>`:''}</div></div>`;
   }).join('')||'<p class="empty">No employers yet.</p>';
   loadEmployers();
 }
@@ -1689,16 +1704,28 @@ async function addEmployer(){
   loadEmployersList();loadJobsList();loadJobs();
 }
 
-async function editEmployer(id,name,noTax){
-  const nextName=prompt('Employer name:',name);
-  if(nextName===null)return;
-  const noTaxInput=prompt(`No Tax for "${nextName.trim()}"? Enter "yes" or "no".`,noTax?'yes':'no');
-  if(noTaxInput===null)return;
-  const normalized=(noTaxInput||'').trim().toLowerCase();
-  if(!['yes','no','y','n'].includes(normalized)){toast('Enter yes or no','error');return}
-  const nextNoTax=['yes','y'].includes(normalized);
-  const res=await fetch('/api/employers/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:nextName.trim(),no_tax:nextNoTax})});
+function openEmployerModal(id,name,noTax){
+  sv('ee-id',id);
+  sv('ee-name',name||'');
+  $('ee-no-tax').checked=!!noTax;
+  $('employer-edit-modal').classList.add('open');
+}
+
+function closeEmployerModal(){
+  $('employer-edit-modal').classList.remove('open');
+  sv('ee-id','');
+  sv('ee-name','');
+  $('ee-no-tax').checked=false;
+}
+
+async function saveEmployerEdit(){
+  const id=gv('ee-id');
+  const name=gv('ee-name');
+  const no_tax=$('ee-no-tax').checked;
+  if(!name){toast('Employer name is required','error');return}
+  const res=await fetch('/api/employers/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,no_tax})});
   if(!res.ok){const d=await res.json();toast(d.error||'Failed to update employer','error');return}
+  closeEmployerModal();
   toast('Employer updated','success');
   loadEmployersList();loadJobsList();loadJobs();loadDashboard();
 }
@@ -1710,6 +1737,8 @@ async function deleteEmployer(id,name){
   toast('Employer deleted','success');
   loadEmployersList();loadJobsList();loadJobs();loadDashboard();
 }
+
+$('employer-edit-modal').addEventListener('click',function(e){if(e.target===this)closeEmployerModal()});
 
 async function addJob(){
   const employerValue=gv('nj-employer');
@@ -1731,7 +1760,12 @@ async function editJob(id){
   $('job-edit-modal').classList.add('open');
 }
 
-function closeJobModal(){$('job-edit-modal').classList.remove('open')}
+function closeJobModal(){
+  $('job-edit-modal').classList.remove('open');
+  sv('ej-id','');
+  sv('ej-name','');
+  sv('ej-employer','');
+}
 
 async function saveJobEdit(){
   const id=gv('ej-id');
@@ -1881,7 +1915,7 @@ document.addEventListener('keydown',e=>{
   const tag=document.activeElement.tagName;
   if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT')return;
   if(e.key==='?'){e.preventDefault();$('shortcut-overlay').classList.toggle('open');return}
-  if(e.key==='Escape'){$('shortcut-overlay').classList.remove('open');closeEditModal();closeUserModal();return}
+  if(e.key==='Escape'){$('shortcut-overlay').classList.remove('open');closeEditModal();closeUserModal();closeEmployerModal();closeJobModal();return}
   const idx='12345'.indexOf(e.key);
   if(idx>=0&&idx<viewKeys.length){
     const navItems=document.querySelectorAll('.nav-item');
