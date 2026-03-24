@@ -1003,7 +1003,7 @@ function addTipCalcEmployeeRow(name='',hours='',userId=null){
   const rowId='tip-calc-row-'+(++tipCalcRowCounter);
   row.className='tipcalc-employee-row';
   row.id=rowId;
-  row.dataset.tipcalcUserId=userId===null?'':String(userId);
+  row.dataset.tipcalcUserId=userId===null?'null':String(userId);
   row.innerHTML=`
     <div class="form-group"><label for="${rowId}-name">Name</label><input id="${rowId}-name" data-tipcalc-field="name" placeholder="Employee name"></div>
     <div class="form-group"><label for="${rowId}-hours">Hours Worked</label><input type="number" id="${rowId}-hours" data-tipcalc-field="hours" step="0.01" placeholder="0.00"></div>
@@ -1086,8 +1086,8 @@ function runTipCalculation(){
     const name=row.querySelector('[data-tipcalc-field="name"]').value.trim();
     const hoursRaw=row.querySelector('[data-tipcalc-field="hours"]').value;
     const hours=hoursRaw===''?0:Number(hoursRaw);
-    const userIdRaw=row.dataset.tipcalcUserId||'';
-    const userId=userIdRaw===''?null:parseInt(userIdRaw,10);
+    const userIdRaw=row.dataset.tipcalcUserId||'null';
+    const userId=userIdRaw==='null'?null:parseInt(userIdRaw,10);
     return{name,hours,userId:Number.isInteger(userId)?userId:null};
   });
   if(!Number.isFinite(totalTips)){
@@ -1118,8 +1118,8 @@ async function createShiftFromTipCalculator(){
     const name=row.querySelector('[data-tipcalc-field="name"]').value.trim();
     const hoursRaw=row.querySelector('[data-tipcalc-field="hours"]').value;
     const hours=hoursRaw===''?0:Number(hoursRaw);
-    const userIdRaw=row.dataset.tipcalcUserId||'';
-    const userId=userIdRaw===''?null:parseInt(userIdRaw,10);
+    const userIdRaw=row.dataset.tipcalcUserId||'null';
+    const userId=userIdRaw==='null'?null:parseInt(userIdRaw,10);
     return{name,hours,userId:Number.isInteger(userId)?userId:null};
   });
   const jobIdRaw=gv('tip-calc-job');
@@ -1136,7 +1136,7 @@ async function createShiftFromTipCalculator(){
     return;
   }
   const myName=currentUser&&currentUser.display_name?currentUser.display_name.trim().toLowerCase():'';
-  const myRow=result.employees.find(e=>e.userId===currentUser.id)||result.employees.find(e=>e.name.trim().toLowerCase()===myName);
+  const myRow=result.employees.find(e=>e.userId===currentUser.id)||((myName!=='')?result.employees.find(e=>e.name.trim().toLowerCase()===myName):null);
   if(!myRow){setTipCalcError('Add yourself to the calculator before saving your shift.');return}
   const job=jobsCache.find(j=>j.id===jobId);
   if(!job||job.archived){setTipCalcError('Selected job is unavailable.');return}
@@ -1146,7 +1146,8 @@ async function createShiftFromTipCalculator(){
   const data=await res.json();
   if(!res.ok){setTipCalcError(data.error||'Failed to save shift from calculator.');return}
   setTipCalcError('');
-  toast(`Shift saved from calculator for ${myRow.name||'you'} (${formatTruncatedMoney(savedTip)} tips)`,'success');
+  const savedTipDisplay=job.tip_calc_round?`$${savedTip}`:formatTruncatedMoney(savedTip);
+  toast(`Shift saved from calculator for ${myRow.name||'you'} (${savedTipDisplay} tips)`,'success');
   closeTipCalcModal();
   clearForm();
   loadHistory();

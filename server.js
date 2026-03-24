@@ -323,6 +323,7 @@ function migrate() {
     () => {
       const cols = db.prepare('PRAGMA table_info(jobs)').all().map(c => c.name);
       if (!cols.includes('tip_calc_round')) {
+        // SQLite stores booleans as INTEGER values (0/1).
         db.exec('ALTER TABLE jobs ADD COLUMN tip_calc_round INTEGER NOT NULL DEFAULT 0');
       }
     },
@@ -1352,19 +1353,19 @@ app.get('/api/jobs', authMiddleware, (req, res) => {
   ).all(...visibleIds));
 });
 
-app.post('/api/jobs', authMiddleware, validate(JobSchema), (req, res) => {
+app.post('/api/jobs', authMiddleware, authRateLimit, validate(JobSchema), (req, res) => {
   try {
     const { name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, tip_calc_round } = req.validated;
     const userId = req.user ? req.user.id : null;
     const result = db.prepare('INSERT INTO jobs (name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, tip_calc_round, user_id) VALUES (?,?,?,?,?,?,?,?)')
       .run(name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, tip_calc_round ? 1 : 0, userId);
-    res.json({ id: result.lastInsertRowid, name, default_rate, color, tip_payment, tip_calc_round: tip_calc_round ? 1 : 0, user_id: userId });
+    res.json({ id: result.lastInsertRowid, name, default_rate, color, tip_payment, tip_calc_round: !!tip_calc_round, user_id: userId });
   } catch (e) {
     internalError(res, e);
   }
 });
 
-app.put('/api/jobs/:id', authMiddleware, validate(JobSchema), (req, res) => {
+app.put('/api/jobs/:id', authMiddleware, authRateLimit, validate(JobSchema), (req, res) => {
   try {
     const job = db.prepare('SELECT * FROM jobs WHERE id = ?').get(req.params.id);
     if (!job) return res.status(404).json({ error: 'Job not found' });
