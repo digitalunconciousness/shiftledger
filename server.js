@@ -16,6 +16,7 @@ const logger = pino({
 });
 
 const app = express();
+app.disable('x-powered-by');
 const PORT = process.env.PORT || 3000;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'shifts.db');
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
@@ -164,7 +165,25 @@ function migrate() {
         db.exec("ALTER TABLE jobs ADD COLUMN tip_payment TEXT NOT NULL DEFAULT 'cash'");
       }
     },
-    // v7: user-scoped jobs, templates, goals, and per-user tax_config
+    // v7: paychecks table for tracking real paycheck data
+    () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS paychecks (
+          id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id             INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          pay_date            TEXT    NOT NULL,
+          gross_pay           REAL    NOT NULL DEFAULT 0,
+          federal_withholding REAL    NOT NULL DEFAULT 0,
+          state_withholding   REAL    NOT NULL DEFAULT 0,
+          social_security     REAL    NOT NULL DEFAULT 0,
+          medicare            REAL    NOT NULL DEFAULT 0,
+          net_pay             REAL    NOT NULL DEFAULT 0,
+          notes               TEXT    DEFAULT '',
+          created_at          TEXT    DEFAULT (datetime('now'))
+        )
+      `);
+    },
+    // v8: user-scoped jobs, templates, goals, and per-user tax_config
     () => {
       const jobCols = db.prepare('PRAGMA table_info(jobs)').all().map(c => c.name);
       if (!jobCols.includes('user_id')) {
@@ -183,7 +202,7 @@ function migrate() {
         db.exec('ALTER TABLE tax_config ADD COLUMN user_id INTEGER REFERENCES users(id)');
       }
     },
-    // v8: households feature
+    // v9: households feature
     () => {
       db.exec(`
         CREATE TABLE IF NOT EXISTS households (
@@ -204,8 +223,13 @@ function migrate() {
         )
       `);
     },
-    // v9: fix tax_config UNIQUE constraint to allow per-user rows (key+user_id unique)
+    // v10: fix tax_config UNIQUE constraint to allow per-user rows (key+user_id unique)
     () => {
+      // Guard: if user_id column was not yet added by v8 (e.g. on a db that went through v7=paychecks but not v8 yet), add it first
+      const taxCols = db.prepare('PRAGMA table_info(tax_config)').all().map(c => c.name);
+      if (!taxCols.includes('user_id')) {
+        db.exec('ALTER TABLE tax_config ADD COLUMN user_id INTEGER REFERENCES users(id)');
+      }
       // Recreate tax_config with composite unique constraint
       db.exec(`
         CREATE TABLE IF NOT EXISTS tax_config_new (
@@ -225,6 +249,21 @@ function migrate() {
                SELECT id, key, label, rate, flat_amount, enabled, sort_order, user_id FROM tax_config`);
       db.exec('DROP TABLE tax_config');
       db.exec('ALTER TABLE tax_config_new RENAME TO tax_config');
+    },
+    // v11: repair missing user_id columns on older databases that may have skipped v8
+    () => {
+      const tableFixes = [
+        ['jobs', 'ALTER TABLE jobs ADD COLUMN user_id INTEGER REFERENCES users(id)'],
+        ['templates', 'ALTER TABLE templates ADD COLUMN user_id INTEGER REFERENCES users(id)'],
+        ['goals', 'ALTER TABLE goals ADD COLUMN user_id INTEGER REFERENCES users(id)'],
+        ['tax_config', 'ALTER TABLE tax_config ADD COLUMN user_id INTEGER REFERENCES users(id)'],
+      ];
+      for (const [tableName, alterSql] of tableFixes) {
+        const cols = db.prepare(`PRAGMA table_info(${tableName})`).all().map(c => c.name);
+        if (!cols.includes('user_id')) {
+          db.exec(alterSql);
+        }
+      }
     },
   ];
 
@@ -280,7 +319,31 @@ function appendUserFilter(sql, params, filterUser, column = 'user_id') {
 }
 
 // ── Middleware ────────────────────────────────────────────────────────────────
-app.use(express.json());
+app.use(express.json({ limit: '100kb' }));
+
+// Security headers
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  // X-Frame-Options kept for older browser compatibility; frame-ancestors 'none' in CSP takes precedence in modern browsers
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '0');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader(
+    'Content-Security-Policy',
+    // unsafe-inline is required because index.html uses inline <script> and <style> blocks.
+    // A future refactor to external files + nonces would allow removing these directives.
+    "default-src 'self'; " +
+    "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; " +
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+    "font-src 'self' https://fonts.gstatic.com; " +
+    "img-src 'self' data:; " +
+    "connect-src 'self'; " +
+    "frame-ancestors 'none';"
+  );
+  next();
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Request logging
@@ -386,6 +449,15 @@ function createRateLimiter(windowMs, maxRequests) {
 
 // Rate limiters for sensitive auth endpoints
 const authRateLimit = createRateLimiter(15 * 60 * 1000, 20); // 20 requests per 15 min
+// General API rate limiter
+const apiRateLimit = createRateLimiter(60 * 1000, 120); // 120 requests per minute per IP
+
+// Safe error response — never leak internal error details in production
+function internalError(res, err) {
+  logger.error(err);
+  const msg = process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message;
+  res.status(500).json({ error: msg });
+}
 
 // Auth middleware
 function authMiddleware(req, res, next) {
@@ -466,6 +538,17 @@ const GoalSchema = z.object({
   active: z.boolean().optional().default(true),
 });
 
+const PaycheckSchema = z.object({
+  pay_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'pay_date must be YYYY-MM-DD'),
+  gross_pay: z.number().positive(),
+  federal_withholding: z.number().nonnegative().default(0),
+  state_withholding: z.number().nonnegative().default(0),
+  social_security: z.number().nonnegative().default(0),
+  medicare: z.number().nonnegative().default(0),
+  net_pay: z.number().nonnegative(),
+  notes: z.string().max(500).optional().default(''),
+});
+
 const RegisterSchema = z.object({
   username: z.string().min(2).max(50).regex(/^[a-zA-Z0-9_]+$/),
   password: z.string().min(4).max(200),
@@ -525,6 +608,14 @@ function getPeriodBounds() {
 
 // ── Auth Routes ──────────────────────────────────────────────────────────────
 
+// Apply general rate limit to all API routes
+app.use('/api', apiRateLimit);
+
+// GET /api/health — simple liveness check (no auth required)
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', uptime: process.uptime() });
+});
+
 // GET /api/auth/status — check if setup needed or logged in
 app.get('/api/auth/status', (req, res) => {
   const userCount = getUserCount();
@@ -561,8 +652,7 @@ app.post('/api/auth/setup', authRateLimit, validate(RegisterSchema), async (req,
     res.setHeader('Set-Cookie', `sl_session=${signCookie(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_AGE / 1000}`);
     res.json({ success: true, token, user: { id: result.lastInsertRowid, username, display_name, is_admin: true, color: assignedColor } });
   } catch (e) {
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -580,8 +670,7 @@ app.post('/api/auth/login', authRateLimit, validate(LoginSchema), async (req, re
     res.setHeader('Set-Cookie', `sl_session=${signCookie(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_AGE / 1000}`);
     res.json({ success: true, token, user: { id: user.id, username: user.username, display_name: user.display_name, is_admin: !!user.is_admin, color: user.color } });
   } catch (e) {
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -613,8 +702,7 @@ app.post('/api/auth/register', authMiddleware, adminOnly, validate(RegisterSchem
     res.json({ success: true, user: { id: result.lastInsertRowid, username, display_name, is_admin: false, color: assignedColor } });
   } catch (e) {
     if (e.message.includes('UNIQUE')) return res.status(409).json({ error: 'Username already taken' });
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -635,8 +723,7 @@ app.post('/api/auth/signup', authRateLimit, validate(RegisterSchema), async (req
     res.status(201).json({ success: true, token, user: { id: result.lastInsertRowid, username, display_name, is_admin: false, color: assignedColor } });
   } catch (e) {
     if (e.message.includes('UNIQUE')) return res.status(409).json({ error: 'Username already taken' });
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -708,8 +795,7 @@ app.put('/api/users/:id', authMiddleware, async (req, res) => {
     }
     res.json({ success: true });
   } catch (e) {
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -858,8 +944,7 @@ app.post('/api/shifts', authMiddleware, validate(ShiftSchema), (req, res) => {
 
     res.json({ id: result.lastInsertRowid, total_tips, wage_total, grand_total });
   } catch (e) {
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -897,8 +982,7 @@ app.put('/api/shifts/:id', authMiddleware, validate(ShiftSchema), (req, res) => 
 
     res.json({ success: true, total_tips, wage_total, grand_total });
   } catch (e) {
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -939,8 +1023,7 @@ app.post('/api/jobs', authMiddleware, validate(JobSchema), (req, res) => {
       .run(name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, userId);
     res.json({ id: result.lastInsertRowid, name, default_rate, color, tip_payment, user_id: userId });
   } catch (e) {
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -960,8 +1043,7 @@ app.put('/api/jobs/:id', authMiddleware, validate(JobSchema), (req, res) => {
       .run(name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, req.params.id);
     res.json({ success: true });
   } catch (e) {
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -1008,8 +1090,7 @@ app.put('/api/settings', authMiddleware, adminOnly, (req, res) => {
     }
     res.json({ success: true });
   } catch (e) {
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -1057,7 +1138,7 @@ function getNextSemiAnnualDate(fromDate = new Date()) {
 }
 
 function applyBaselineTaxRates(rates) {
-  const updateRate = db.prepare('UPDATE tax_config SET rate = ? WHERE key = ?');
+  const updateRate = db.prepare('UPDATE tax_config SET rate = ? WHERE key = ? AND user_id IS NULL');
   const keyAliases = {
     federal_tax: 'federal',
     state_tax: 'state',
@@ -1224,8 +1305,7 @@ app.post('/api/tax-profiles/refresh', authMiddleware, adminOnly, (req, res) => {
     const result = autoRefreshTaxRates(true);
     res.json({ success: true, ...result, meta: getTaxProfilesMeta() });
   } catch (e) {
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -1303,7 +1383,7 @@ app.put('/api/tax-config/:id', authMiddleware, (req, res) => {
     db.prepare('UPDATE tax_config SET label=?, rate=?, flat_amount=?, enabled=? WHERE id=?')
       .run(label ?? row.label, rate ?? row.rate, flat_amount ?? row.flat_amount, enabled !== undefined ? (enabled ? 1 : 0) : row.enabled, id);
     res.json({ success: true });
-  } catch (e) { logger.error(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { internalError(res, e); }
 });
 
 app.post('/api/tax-config', authMiddleware, (req, res) => {
@@ -1317,7 +1397,7 @@ app.post('/api/tax-config', authMiddleware, (req, res) => {
     res.json({ id: result.lastInsertRowid });
   } catch (e) {
     if (e.message.includes('UNIQUE')) return res.status(409).json({ error: 'Key already exists' });
-    logger.error(e); res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -1332,6 +1412,68 @@ app.delete('/api/tax-config/:id', authMiddleware, (req, res) => {
   }
   db.prepare('DELETE FROM tax_config WHERE id = ?').run(req.params.id);
   res.json({ success: true });
+});
+
+// ── Paycheck History Routes ───────────────────────────────────────────────────
+
+app.get('/api/paychecks', authMiddleware, (req, res) => {
+  try {
+    const rows = db.prepare(
+      'SELECT * FROM paychecks WHERE user_id = ? ORDER BY pay_date DESC LIMIT 50'
+    ).all(req.user.id);
+    res.json(rows);
+  } catch (e) { logger.error(e); res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/paychecks', authMiddleware, validate(PaycheckSchema), (req, res) => {
+  try {
+    const d = req.validated;
+    const result = db.prepare(
+      `INSERT INTO paychecks (user_id, pay_date, gross_pay, federal_withholding, state_withholding, social_security, medicare, net_pay, notes)
+       VALUES (?,?,?,?,?,?,?,?,?)`
+    ).run(req.user.id, d.pay_date, d.gross_pay, d.federal_withholding, d.state_withholding, d.social_security, d.medicare, d.net_pay, d.notes || '');
+    res.status(201).json({ id: result.lastInsertRowid });
+  } catch (e) { logger.error(e); res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/paychecks/:id', authMiddleware, (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const row = db.prepare('SELECT * FROM paychecks WHERE id = ?').get(id);
+    if (!row) return res.status(404).json({ error: 'Paycheck not found' });
+    if (row.user_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Forbidden' });
+    db.prepare('DELETE FROM paychecks WHERE id = ?').run(id);
+    res.json({ success: true });
+  } catch (e) { logger.error(e); res.status(500).json({ error: e.message }); }
+});
+
+// Apply the effective tax rates from a paycheck entry to the tax_config table
+app.post('/api/paychecks/:id/apply-rates', authMiddleware, adminOnly, (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const row = db.prepare('SELECT * FROM paychecks WHERE id = ?').get(id);
+    if (!row) return res.status(404).json({ error: 'Paycheck not found' });
+    if (row.gross_pay <= 0) return res.status(400).json({ error: 'Gross pay must be > 0 to calculate rates' });
+
+    const rates = {
+      federal: Math.round(row.federal_withholding / row.gross_pay * 10000) / 10000,
+      state: Math.round(row.state_withholding / row.gross_pay * 10000) / 10000,
+      social_security: Math.round(row.social_security / row.gross_pay * 10000) / 10000,
+      medicare: Math.round(row.medicare / row.gross_pay * 10000) / 10000,
+    };
+
+    const update = db.prepare('UPDATE tax_config SET rate = ? WHERE key = ? AND user_id IS NULL');
+    const tx = db.transaction(() => {
+      const applied = {};
+      for (const [key, rate] of Object.entries(rates)) {
+        const info = update.run(rate, key);
+        applied[key] = info.changes > 0 ? rate : null;
+      }
+      return applied;
+    });
+    const applied = tx();
+    res.json({ success: true, applied });
+  } catch (e) { logger.error(e); res.status(500).json({ error: e.message }); }
 });
 
 // ── Paycheck Estimate ────────────────────────────────────────────────────────
@@ -1518,8 +1660,7 @@ app.get('/api/paycheck-estimate', authMiddleware, (req, res) => {
       projected_cash_tips: projectedCashTips,
     });
   } catch (e) {
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -1543,8 +1684,7 @@ app.post('/api/templates', authMiddleware, validate(TemplateSchema), (req, res) 
       .run(name, job_id, hourly_rate, hours_worked, tip_mode, tip_input, notes, userId);
     res.json({ id: result.lastInsertRowid });
   } catch (e) {
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -1578,8 +1718,7 @@ app.post('/api/goals', authMiddleware, validate(GoalSchema), (req, res) => {
     const result = db.prepare('INSERT INTO goals (period, target_amount, active, user_id) VALUES (?,?,?,?)').run(period, target_amount, active ? 1 : 0, userId);
     res.json({ id: result.lastInsertRowid });
   } catch (e) {
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -1596,8 +1735,7 @@ app.put('/api/goals/:id', authMiddleware, validate(GoalSchema), (req, res) => {
     db.prepare('UPDATE goals SET period=?, target_amount=?, active=? WHERE id=?').run(period, target_amount, active ? 1 : 0, req.params.id);
     res.json({ success: true });
   } catch (e) {
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -1691,8 +1829,7 @@ app.get('/api/goals/history', authMiddleware, (req, res) => {
 
     res.json(results);
   } catch (e) {
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -1946,8 +2083,7 @@ app.post('/api/import/csv', authMiddleware, express.text({ type: '*/*', limit: '
 
     res.json({ imported, errors });
   } catch (e) {
-    logger.error(e);
-    res.status(500).json({ error: e.message });
+    internalError(res, e);
   }
 });
 
@@ -2065,6 +2201,14 @@ app.get('/api/export/pdf', authMiddleware, (req, res) => {
   doc.fontSize(8).font('Helvetica').fillColor('#aaa')
     .text(`Generated by ShiftLedger · ${new Date().toLocaleString()}`, 50, 740, { align: 'center', width: 512 });
   doc.end();
+});
+
+// ── Global Error Handler ──────────────────────────────────────────────────────
+// Catches any unhandled errors thrown synchronously in route handlers.
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, _next) => {
+  if (res.headersSent) return _next(err);
+  internalError(res, err);
 });
 
 // ── Start ────────────────────────────────────────────────────────────────────

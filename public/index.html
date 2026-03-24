@@ -599,6 +599,32 @@ canvas{max-height:280px}
           </div>
           <div style="font-size:.68rem;color:var(--text-mute);font-family:var(--mono);margin-top:8px" id="tp-meta-line"></div>
         </div>
+        <!-- Paycheck Entry (Admin) -->
+        <div class="card" style="margin-bottom:20px">
+          <div class="card-label" style="margin-bottom:4px">Paycheck Entry</div>
+          <p style="font-size:.75rem;color:var(--text-mute);margin-bottom:12px;font-family:var(--mono)">Enter real paycheck data to calculate actual withholding rates and optionally apply them to your tax config.</p>
+          <div class="form-grid">
+            <div class="form-group"><label>Pay Date</label><input type="date" id="pc-date"></div>
+            <div class="form-group"><label>Gross Pay ($)</label><input type="number" id="pc-gross" step="0.01" min="0" placeholder="0.00" oninput="updatePaycheckRates()"></div>
+            <div class="form-group"><label>Federal Withholding ($)</label><input type="number" id="pc-federal" step="0.01" min="0" placeholder="0.00" oninput="updatePaycheckRates()"></div>
+            <div class="form-group"><label>State Withholding ($)</label><input type="number" id="pc-state" step="0.01" min="0" placeholder="0.00" oninput="updatePaycheckRates()"></div>
+            <div class="form-group"><label>Social Security ($)</label><input type="number" id="pc-ss" step="0.01" min="0" placeholder="0.00" oninput="updatePaycheckRates()"></div>
+            <div class="form-group"><label>Medicare ($)</label><input type="number" id="pc-medicare" step="0.01" min="0" placeholder="0.00" oninput="updatePaycheckRates()"></div>
+            <div class="form-group"><label>Net Pay ($)</label><input type="number" id="pc-net" step="0.01" min="0" placeholder="0.00"></div>
+            <div class="form-group full"><label>Notes</label><input id="pc-notes" placeholder="e.g. Week of Mar 17"></div>
+          </div>
+          <div id="pc-rates-preview" style="display:none;margin:12px 0;padding:12px;background:var(--surface);border-radius:8px;font-family:var(--mono);font-size:.8rem">
+            <div style="font-size:.72rem;color:var(--text-mute);margin-bottom:8px">Effective Rates (calculated from gross pay)</div>
+            <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px 20px" id="pc-rates-grid"></div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
+            <button class="btn btn-primary btn-sm" onclick="savePaycheck()">Save Paycheck</button>
+            <button class="btn btn-ghost btn-sm" id="pc-apply-btn" onclick="applyPaycheckRates()" style="display:none">Apply Rates to Tax Config</button>
+          </div>
+          <div class="divider" style="margin-top:16px"></div>
+          <div class="card-label" style="margin-bottom:8px">Paycheck History</div>
+          <div id="pc-history-list"><p style="font-size:.8rem;color:var(--text-mute);font-family:var(--mono)">No paycheck entries yet.</p></div>
+        </div>
       </div>
     </div>
 
@@ -1147,6 +1173,7 @@ async function loadSettings(){
     $('set-anchor').value=s.pay_period_anchor||'';
     toggleAnchor();
     loadTaxProfiles();
+    loadPaycheckHistory();
   }
 }
 
@@ -1287,6 +1314,103 @@ async function applyTaxProfile(){
   loadTaxConfig();
   $('tp-status').value='';$('tp-profile').innerHTML='<option value="">— select status first —</option>';
   $('tp-preview').style.display='none';
+}
+
+// ── Paycheck Entry ────────────────────────────────────────────────────────────
+
+let _lastSavedPaycheckId=null;
+
+function updatePaycheckRates(){
+  const gross=parseFloat($('pc-gross').value)||0;
+  const federal=parseFloat($('pc-federal').value)||0;
+  const state=parseFloat($('pc-state').value)||0;
+  const ss=parseFloat($('pc-ss').value)||0;
+  const medicare=parseFloat($('pc-medicare').value)||0;
+  const preview=$('pc-rates-preview');
+  const grid=$('pc-rates-grid');
+  const applyBtn=$('pc-apply-btn');
+  if(gross<=0){preview.style.display='none';if(applyBtn)applyBtn.style.display='none';return}
+  const items=[
+    {label:'Federal',amount:federal},
+    {label:'State',amount:state},
+    {label:'Social Security',amount:ss},
+    {label:'Medicare',amount:medicare},
+  ];
+  grid.innerHTML=items.map(i=>{
+    const rate=gross>0?(i.amount/gross*100).toFixed(2):'0.00';
+    return `<div><span style="color:var(--text-mute)">${i.label}</span> <strong>${rate}%</strong> <span style="color:var(--text-mute);font-size:.72rem">($${i.amount.toFixed(2)})</span></div>`;
+  }).join('');
+  preview.style.display='block';
+  if(applyBtn&&_lastSavedPaycheckId&&currentUser&&currentUser.is_admin)applyBtn.style.display='';
+}
+
+async function savePaycheck(){
+  const pay_date=gv('pc-date');
+  const gross_pay=parseFloat($('pc-gross').value);
+  const federal_withholding=parseFloat($('pc-federal').value)||0;
+  const state_withholding=parseFloat($('pc-state').value)||0;
+  const social_security=parseFloat($('pc-ss').value)||0;
+  const medicare=parseFloat($('pc-medicare').value)||0;
+  const net_pay=parseFloat($('pc-net').value)||0;
+  const notes=gv('pc-notes');
+  if(!pay_date){toast('Enter a pay date','error');return}
+  if(isNaN(gross_pay)||gross_pay<=0){toast('Enter a valid gross pay amount greater than 0','error');return}
+  const body={pay_date,gross_pay,federal_withholding,state_withholding,social_security,medicare,net_pay,notes};
+  const res=await fetch('/api/paychecks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!res.ok){const d=await res.json();toast(d.error||'Failed to save paycheck','error');return}
+  const data=await res.json();
+  _lastSavedPaycheckId=data.id;
+  toast('Paycheck saved','success');
+  const applyBtn=$('pc-apply-btn');
+  if(applyBtn&&currentUser&&currentUser.is_admin)applyBtn.style.display='';
+  loadPaycheckHistory();
+}
+
+async function applyPaycheckRates(){
+  if(!_lastSavedPaycheckId){toast('Save a paycheck first','error');return}
+  if(!confirm('Apply the effective rates from this paycheck to your Federal, State, Social Security, and Medicare tax config? This will overwrite the current rates.'))return;
+  const res=await fetch('/api/paychecks/'+_lastSavedPaycheckId+'/apply-rates',{method:'POST'});
+  if(!res.ok){const d=await res.json();toast(d.error||'Failed to apply rates','error');return}
+  toast('Rates applied to tax config','success');
+  loadTaxConfig();
+}
+
+async function loadPaycheckHistory(){
+  const paychecks=await fetch('/api/paychecks').then(r=>r.json());
+  const el=$('pc-history-list');
+  if(!paychecks.length){el.innerHTML='<p style="font-size:.8rem;color:var(--text-mute);font-family:var(--mono)">No paycheck entries yet.</p>';return}
+  el.innerHTML=paychecks.map(p=>{
+    const gross=p.gross_pay||0;
+    const total_withholding=p.federal_withholding+p.state_withholding+p.social_security+p.medicare;
+    const effRate=gross>0?(total_withholding/gross*100).toFixed(1):'0.0';
+    return `<div class="user-card" style="margin-bottom:8px;flex-wrap:wrap;gap:6px">
+      <div class="user-info" style="flex:1;min-width:0">
+        <strong>${esc(p.pay_date)}</strong>
+        <small style="font-family:var(--mono)">Gross $${gross.toFixed(2)} · Net $${p.net_pay.toFixed(2)} · Eff. rate ${effRate}%${p.notes?' · '+esc(p.notes):''}</small>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
+        ${currentUser&&currentUser.is_admin?`<button class="btn btn-ghost btn-sm" onclick="applyHistoryPaycheckRates(${p.id})">Apply Rates</button>`:''}
+        <button class="btn btn-danger btn-sm" onclick="deletePaycheck(${p.id})">×</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function applyHistoryPaycheckRates(id){
+  if(!confirm('Apply the effective rates from this paycheck to your Federal, State, Social Security, and Medicare tax config? This will overwrite the current rates.'))return;
+  const res=await fetch('/api/paychecks/'+id+'/apply-rates',{method:'POST'});
+  if(!res.ok){const d=await res.json();toast(d.error||'Failed to apply rates','error');return}
+  toast('Rates applied to tax config','success');
+  loadTaxConfig();
+}
+
+async function deletePaycheck(id){
+  if(!confirm('Delete this paycheck entry?'))return;
+  const res=await fetch('/api/paychecks/'+id,{method:'DELETE'});
+  if(!res.ok){const d=await res.json();toast(d.error||'Failed to delete','error');return}
+  toast('Paycheck deleted','success');
+  if(_lastSavedPaycheckId===id){_lastSavedPaycheckId=null;const btn=$('pc-apply-btn');if(btn)btn.style.display='none';}
+  loadPaycheckHistory();
 }
 
 
