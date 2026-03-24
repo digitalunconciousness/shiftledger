@@ -451,25 +451,89 @@ canvas{max-height:280px}
       <!-- My Profile -->
       <div class="card" style="margin-bottom:20px">
         <div class="card-label" style="margin-bottom:12px">My Profile</div>
-        <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;padding:12px;background:var(--surface2);border-radius:var(--radius);border:1px solid var(--border)">
-          <span id="set-avatar-dot" class="user-dot" style="width:20px;height:20px"></span>
+        <div id="profile-info" style="display:flex;align-items:center;gap:14px;margin-bottom:16px">
+          <div id="profile-avatar" style="width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:700;font-size:1rem;color:#0a0a0a"></div>
           <div>
-            <div style="font-weight:600" id="set-username-display"></div>
-            <div style="font-family:var(--mono);font-size:.72rem;color:var(--text-dim)" id="set-role-display"></div>
-            <div style="font-family:var(--mono);font-size:.7rem;color:var(--text-mute)" id="set-joined-display"></div>
-            <div style="font-family:var(--mono);font-size:.7rem;color:var(--text-mute)" id="set-household-display"></div>
+            <div id="profile-username" style="font-family:var(--mono);font-size:.85rem;color:var(--text-dim)"></div>
+            <div id="profile-role" style="font-family:var(--mono);font-size:.72rem;margin-top:2px"></div>
+            <div id="set-joined-display" style="font-family:var(--mono);font-size:.7rem;color:var(--text-mute);margin-top:2px"></div>
+            <div id="set-household-display" style="font-family:var(--mono);font-size:.7rem;color:var(--text-mute);margin-top:2px"></div>
           </div>
         </div>
         <div class="form-grid">
           <div class="form-group"><label>Display Name</label><input id="set-name"></div>
-          <div class="form-group"><label>Email</label><input type="email" id="set-email" placeholder="your@email.com"></div>
-          <div class="form-group"><label>Color</label><input type="color" id="set-color" style="height:42px;padding:4px" oninput="document.getElementById('set-avatar-dot').style.background=this.value"></div>
-          <div class="form-group"><label>New Password</label><input type="password" id="set-pass" placeholder="Leave blank to keep current"></div>
+          <div class="form-group"><label>Color</label><input type="color" id="set-color" style="height:42px;padding:4px"></div>
           <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="saveProfile()">Save Profile</button></div>
         </div>
       </div>
-      <!-- Admin: Manage Users -->
+      <!-- Change Password -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-label" style="margin-bottom:12px">Change Password</div>
+        <div class="form-grid">
+          <div class="form-group"><label>Current Password</label><input type="password" id="pw-current" autocomplete="current-password"></div>
+          <div class="form-group"><label>New Password</label><input type="password" id="pw-new" placeholder="8+ chars, letter + number/symbol" autocomplete="new-password"></div>
+          <div class="form-group"><label>Confirm New Password</label><input type="password" id="pw-confirm" autocomplete="new-password"></div>
+          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="changePassword()">Change Password</button></div>
+        </div>
+      </div>
+      <!-- Manage Jobs (all users) -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-label" style="margin-bottom:12px">My Jobs</div>
+        <div id="jobs-list"></div>
+        <div class="divider"></div>
+        <div class="form-grid">
+          <div class="form-group"><label>Job Name</label><input id="nj-name"></div>
+          <div class="form-group"><label>Default Rate</label><input type="number" id="nj-rate" step="0.25" min="0" placeholder="0.00"></div>
+          <div class="form-group"><label>Color</label><input type="color" id="nj-color" value="#f5a623" style="height:42px;padding:4px"></div>
+          <div class="form-group"><label>Tips Paid As</label><select id="nj-tip-payment" style="height:42px"><option value="cash">Cash (Nightly)</option><option value="paycheck">On Paycheck</option></select></div>
+          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addJob()">Add Job</button></div>
+        </div>
+      </div>
+      <!-- Goals (all users) -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-label" style="margin-bottom:12px">My Goals</div>
+        <div id="goals-list"></div>
+        <div class="divider"></div>
+        <div class="form-grid">
+          <div class="form-group"><label>Period</label><select id="ng-period"><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></div>
+          <div class="form-group"><label>Target ($)</label><input type="number" id="ng-amount" step="1" min="0" placeholder="500"></div>
+          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addGoal()">Add Goal</button></div>
+        </div>
+      </div>
+      <!-- Tax & Deduction Rates (all users) -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-label" style="margin-bottom:4px">Tax & Deduction Rates</div>
+        <p style="font-size:.75rem;color:var(--text-mute);margin-bottom:12px;font-family:var(--mono)">Customize your own tax rates. Global defaults are shown; save your own to override.</p>
+        <div id="tax-config-list"></div>
+        <div class="divider"></div>
+        <div class="card-label" style="margin-bottom:8px">Add Custom Deduction</div>
+        <div class="form-grid">
+          <div class="form-group"><label>Key</label><input id="ntc-key" placeholder="e.g. health_ins"></div>
+          <div class="form-group"><label>Label</label><input id="ntc-label" placeholder="e.g. Health Insurance"></div>
+          <div class="form-group"><label>Rate (%)</label><input type="number" id="ntc-rate" step="0.1" min="0" max="100" placeholder="0"></div>
+          <div class="form-group"><label>Flat ($/period)</label><input type="number" id="ntc-flat" step="1" min="0" placeholder="0"></div>
+          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addTaxConfig()">Add</button></div>
+        </div>
+      </div>
+      <!-- Household (all users) -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-label" style="margin-bottom:12px">Household</div>
+        <p style="font-size:.75rem;color:var(--text-mute);margin-bottom:12px;font-family:var(--mono)">Join or create a household to share shift data with family members (read-only access to each other's data).</p>
+        <div id="household-list"></div>
+        <div class="divider"></div>
+        <div class="form-grid">
+          <div class="form-group"><label>Create New Household</label><input id="hh-name" placeholder="e.g. Smith Family"></div>
+          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="createHousehold()">Create</button></div>
+        </div>
+        <div class="divider"></div>
+        <div class="form-grid">
+          <div class="form-group"><label>Join via Invite Code</label><input id="hh-invite" placeholder="Enter invite code"></div>
+          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="joinHousehold()">Join Household</button></div>
+        </div>
+      </div>
+      <!-- Admin Section -->
       <div id="admin-section" style="display:none">
+        <!-- Manage Users -->
         <div class="card" style="margin-bottom:20px">
           <div class="card-label" style="margin-bottom:12px">Manage Users (Admin)</div>
           <div id="users-list"></div>
@@ -482,33 +546,8 @@ canvas{max-height:280px}
             <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addUser()">Add User</button></div>
           </div>
         </div>
-        <!-- Manage Jobs -->
         <div class="card" style="margin-bottom:20px">
-          <div class="card-label" style="margin-bottom:12px">Manage Jobs</div>
-          <div id="jobs-list"></div>
-          <div class="divider"></div>
-          <div class="form-grid">
-            <div class="form-group"><label>Job Name</label><input id="nj-name"></div>
-            <div class="form-group"><label>Default Rate</label><input type="number" id="nj-rate" step="0.25" min="0" placeholder="0.00"></div>
-            <div class="form-group"><label>Color</label><input type="color" id="nj-color" value="#f5a623" style="height:42px;padding:4px"></div>
-            <div class="form-group"><label>Tips Paid As</label><select id="nj-tip-payment" style="height:42px"><option value="cash">Cash (Nightly)</option><option value="paycheck">On Paycheck</option></select></div>
-            <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addJob()">Add Job</button></div>
-          </div>
-        </div>
-        <!-- Goals -->
-        <div class="card">
-          <div class="card-label" style="margin-bottom:12px">Goals</div>
-          <div id="goals-list"></div>
-          <div class="divider"></div>
-          <div class="form-grid">
-            <div class="form-group"><label>Period</label><select id="ng-period"><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></div>
-            <div class="form-group"><label>Target ($)</label><input type="number" id="ng-amount" step="1" min="0" placeholder="500"></div>
-            <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addGoal()">Add Goal</button></div>
-          </div>
-        </div>
-        <!-- App Settings -->
-        <div class="card" style="margin-bottom:20px">
-          <div class="card-label" style="margin-bottom:12px">App Settings</div>
+          <div class="card-label" style="margin-bottom:12px">App Settings (Admin)</div>
           <div class="form-grid">
             <div class="form-group">
               <label>Pay Week Starts On</label>
@@ -570,25 +609,56 @@ canvas{max-height:280px}
           </div>
           <div style="font-size:.68rem;color:var(--text-mute);font-family:var(--mono);margin-top:8px" id="tp-meta-line"></div>
         </div>
-        <!-- Tax & Deduction Rates -->
+        <!-- Paycheck Entry (Admin) -->
         <div class="card" style="margin-bottom:20px">
-          <div class="card-label" style="margin-bottom:12px">Tax & Deduction Rates</div>
-          <p style="font-size:.75rem;color:var(--text-mute);margin-bottom:12px;font-family:var(--mono)">These estimates are for budgeting only — not tax advice.</p>
-          <div id="tax-config-list"></div>
-          <div class="divider"></div>
-          <div class="card-label" style="margin-bottom:8px">Add Custom Deduction</div>
+          <div class="card-label" style="margin-bottom:4px">Paycheck Entry</div>
+          <p style="font-size:.75rem;color:var(--text-mute);margin-bottom:12px;font-family:var(--mono)">Enter real paycheck data to calculate actual withholding rates and optionally apply them to your tax config.</p>
           <div class="form-grid">
-            <div class="form-group"><label>Key</label><input id="ntc-key" placeholder="e.g. health_ins"></div>
-            <div class="form-group"><label>Label</label><input id="ntc-label" placeholder="e.g. Health Insurance"></div>
-            <div class="form-group"><label>Rate (%)</label><input type="number" id="ntc-rate" step="0.1" min="0" max="100" placeholder="0"></div>
-            <div class="form-group"><label>Flat ($/period)</label><input type="number" id="ntc-flat" step="1" min="0" placeholder="0"></div>
-            <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addTaxConfig()">Add</button></div>
+            <div class="form-group"><label>Pay Date</label><input type="date" id="pc-date"></div>
+            <div class="form-group"><label>Gross Pay ($)</label><input type="number" id="pc-gross" step="0.01" min="0" placeholder="0.00" oninput="updatePaycheckRates()"></div>
+            <div class="form-group"><label>Federal Withholding ($)</label><input type="number" id="pc-federal" step="0.01" min="0" placeholder="0.00" oninput="updatePaycheckRates()"></div>
+            <div class="form-group"><label>State Withholding ($)</label><input type="number" id="pc-state" step="0.01" min="0" placeholder="0.00" oninput="updatePaycheckRates()"></div>
+            <div class="form-group"><label>Social Security ($)</label><input type="number" id="pc-ss" step="0.01" min="0" placeholder="0.00" oninput="updatePaycheckRates()"></div>
+            <div class="form-group"><label>Medicare ($)</label><input type="number" id="pc-medicare" step="0.01" min="0" placeholder="0.00" oninput="updatePaycheckRates()"></div>
+            <div class="form-group"><label>Net Pay ($)</label><input type="number" id="pc-net" step="0.01" min="0" placeholder="0.00"></div>
+            <div class="form-group full"><label>Notes</label><input id="pc-notes" placeholder="e.g. Week of Mar 17"></div>
           </div>
+          <div id="pc-rates-preview" style="display:none;margin:12px 0;padding:12px;background:var(--surface);border-radius:8px;font-family:var(--mono);font-size:.8rem">
+            <div style="font-size:.72rem;color:var(--text-mute);margin-bottom:8px">Effective Rates (calculated from gross pay)</div>
+            <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px 20px" id="pc-rates-grid"></div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
+            <button class="btn btn-primary btn-sm" onclick="savePaycheck()">Save Paycheck</button>
+            <button class="btn btn-ghost btn-sm" id="pc-apply-btn" onclick="applyPaycheckRates()" style="display:none">Apply Rates to Tax Config</button>
+          </div>
+          <div class="divider" style="margin-top:16px"></div>
+          <div class="card-label" style="margin-bottom:8px">Paycheck History</div>
+          <div id="pc-history-list"><p style="font-size:.8rem;color:var(--text-mute);font-family:var(--mono)">No paycheck entries yet.</p></div>
+        </div>
+        <!-- Audit Log -->
+        <div class="card" style="margin-bottom:20px">
+          <div class="card-label" style="margin-bottom:12px">Admin Audit Log</div>
+          <div id="audit-log-list" style="font-family:var(--mono);font-size:.78rem;color:var(--text-dim)">Loading…</div>
         </div>
       </div>
     </div>
 
   </main>
+</div>
+
+<!-- Reset Password Modal -->
+<div class="modal-overlay" id="reset-pw-modal" role="dialog" aria-modal="true" aria-labelledby="reset-pw-modal-title">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title" id="reset-pw-modal-title">Reset Password</span><button class="close-btn" onclick="closeResetPwModal()" aria-label="Close reset password dialog"><span aria-hidden="true">×</span></button></div>
+    <input type="hidden" id="reset-pw-user-id">
+    <p id="reset-pw-user-label" style="font-family:var(--mono);font-size:.85rem;color:var(--text-dim);margin-bottom:16px"></p>
+    <div class="form-grid">
+      <div class="form-group"><label>New Password</label><input type="password" id="reset-pw-new" placeholder="8+ chars, letter + number/symbol" autocomplete="new-password"></div>
+      <div class="form-group"><label>Confirm Password</label><input type="password" id="reset-pw-confirm" autocomplete="new-password"></div>
+    </div>
+    <div class="divider"></div>
+    <div style="display:flex;gap:10px"><button class="btn btn-primary" onclick="submitAdminResetPw()">Reset Password</button><button class="btn btn-ghost" onclick="closeResetPwModal()">Cancel</button></div>
+  </div>
 </div>
 
 <!-- Edit Modal -->
@@ -632,21 +702,19 @@ canvas{max-height:280px}
 <div class="modal-overlay" id="user-edit-modal" role="dialog" aria-modal="true" aria-labelledby="user-modal-title">
   <div class="modal">
     <div class="modal-header"><span class="modal-title" id="user-modal-title">Edit User Profile</span><button class="close-btn" onclick="closeUserModal()" aria-label="Close edit user dialog"><span aria-hidden="true">&times;</span></button></div>
-    <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;padding:12px;background:var(--surface2);border-radius:var(--radius);border:1px solid var(--border)">
-      <span id="eu-avatar-dot" class="user-dot" style="width:20px;height:20px"></span>
+    <div id="eu-profile-info" style="display:flex;align-items:center;gap:14px;margin-bottom:16px">
+      <div id="eu-avatar" style="width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:700;font-size:1rem;color:#0a0a0a"></div>
       <div>
-        <div style="font-weight:600" id="eu-username-display"></div>
-        <div style="font-family:var(--mono);font-size:.72rem;color:var(--text-dim)" id="eu-role-display"></div>
-        <div style="font-family:var(--mono);font-size:.7rem;color:var(--text-mute)" id="eu-joined-display"></div>
-        <div style="font-family:var(--mono);font-size:.7rem;color:var(--text-mute)" id="eu-household-display"></div>
+        <div id="eu-username-display" style="font-family:var(--mono);font-size:.85rem;color:var(--text-dim)"></div>
+        <div id="eu-role-display" style="font-family:var(--mono);font-size:.72rem;margin-top:2px"></div>
+        <div id="eu-joined-display" style="font-family:var(--mono);font-size:.7rem;color:var(--text-mute);margin-top:2px"></div>
+        <div id="eu-household-display" style="font-family:var(--mono);font-size:.7rem;color:var(--text-mute);margin-top:2px"></div>
       </div>
     </div>
     <input type="hidden" id="eu-id">
     <div class="form-grid">
       <div class="form-group"><label>Display Name</label><input id="eu-name"></div>
-      <div class="form-group"><label>Email</label><input type="email" id="eu-email" placeholder="user@email.com"></div>
-      <div class="form-group"><label>Color</label><input type="color" id="eu-color" style="height:42px;padding:4px" oninput="document.getElementById('eu-avatar-dot').style.background=this.value"></div>
-      <div class="form-group"><label>New Password</label><input type="password" id="eu-pass" placeholder="Leave blank to keep current"></div>
+      <div class="form-group"><label>Color</label><input type="color" id="eu-color" style="height:42px;padding:4px" oninput="document.getElementById('eu-avatar').style.background=this.value"></div>
     </div>
     <div class="divider"></div>
     <div style="display:flex;gap:10px"><button class="btn btn-primary" onclick="saveUserEdit()">Save</button><button class="btn btn-ghost" onclick="closeUserModal()">Cancel</button></div>
@@ -677,8 +745,8 @@ canvas{max-height:280px}
 let currentUser = null;
 let trendChart=null,breakdownChart=null,tipRatioChart=null,effRateChart=null;
 let currentPeriod='month';
-let dashFilterUser='';
-let histFilterUser='';
+let dashFilterUser='mine';
+let histFilterUser='mine';
 let jobsCache=[];
 let templatesCache=[];
 
@@ -757,7 +825,6 @@ function sv(id,v){document.getElementById(id).value=v}
 function today(){return new Date().toISOString().split('T')[0]}
 function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
 function $(id){return document.getElementById(id)}
-function emailOrNull(id){const v=document.getElementById(id).value.trim();return v||null}
 function formatFixed(value,digits=2){const number=Number(value);return Number.isFinite(number)?number.toFixed(digits):''}
 function formatMoneyTick(value){return '$'+formatFixed(value)}
 function setDecimalValue(id,value,digits=2){if(value===null||value===undefined||value===''){sv(id,'');return}sv(id,formatFixed(value,digits))}
@@ -868,13 +935,16 @@ function clearForm(){
 function setDashFilter(el,uid){
   document.querySelectorAll('#dash-filter .filter-btn').forEach(b=>b.classList.remove('active'));
   el.classList.add('active');
-  dashFilterUser=uid===''?'all':'';
+  dashFilterUser=uid===''?'all':'mine';
   loadDashboard();
 }
 
 async function loadDashboard(){
-  const qs=dashFilterUser==='all'?'?user_id=all':'';
-  const qsa=dashFilterUser==='all'?'&user_id=all':'';
+  const myId=currentUser?currentUser.id:'';
+  const isMine=dashFilterUser==='mine';
+  const isAll=dashFilterUser==='all';
+  const qs=isMine&&myId?`?user_id=${myId}`:isAll&&currentUser&&currentUser.is_admin?'?user_id=all':'';
+  const qsa=isMine&&myId?`&user_id=${myId}`:isAll&&currentUser&&currentUser.is_admin?'&user_id=all':'';
   const[sumRes,trendRes,dowRes,tipRes,otRes,taxRes,goalsRes,pchkRes,histRes]=await Promise.all([
     fetch('/api/summary'+qs),fetch('/api/trends?period='+currentPeriod+qsa),
     fetch('/api/analytics/effective-rate'+qs),fetch('/api/analytics/tip-ratio'+qs),
@@ -1046,7 +1116,7 @@ function renderEffRateChart(data){
 function setHistFilter(el,uid){
   el.parentElement.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
   el.classList.add('active');
-  histFilterUser=uid===''?'all':'';
+  histFilterUser=uid===''?'all':'mine';
   loadHistory();
 }
 
@@ -1054,7 +1124,9 @@ async function loadHistory(){
   const from=gv('hist-from'),to=gv('hist-to');
   let url='/api/shifts?';
   if(from&&to)url+=`from=${from}&to=${to}&`;else if(from)url+=`from=${from}&`;
-  if(histFilterUser==='all')url+=`user_id=all&`;
+  const myId=currentUser?currentUser.id:'';
+  if(histFilterUser==='mine'&&myId)url+=`user_id=${myId}&`;
+  else if(histFilterUser==='all'&&currentUser&&currentUser.is_admin)url+=`user_id=all&`;
   const shifts=await fetch(url).then(r=>r.json());
   const tbody=$('history-body');
   if(!shifts.length){tbody.innerHTML='<tr><td colspan="11" class="empty">No shifts found.</td></tr>';$('history-totals').style.display='none';return}
@@ -1139,28 +1211,36 @@ async function loadAppSettings(){
 }
 
 async function loadSettings(){
+  // Profile section (all users) — fetch fresh data from API for join date + households
   try {
     const profile=await fetch('/api/profile').then(r=>r.json());
     $('set-name').value=profile.display_name;
     $('set-color').value=profile.color;
-    $('set-email').value=profile.email||'';
-    $('set-avatar-dot').style.background=profile.color;
-    $('set-username-display').textContent='@'+profile.username;
-    $('set-role-display').textContent=profile.is_admin?'Administrator':'User';
-    $('set-joined-display').textContent='Joined '+new Date(profile.created_at).toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
-    $('set-household-display').textContent='Household: '+(profile.household?profile.household:'None');
+    const roleEl=$('profile-role');
+    if(roleEl) roleEl.textContent=profile.is_admin?'Administrator':'User';
+    const avatarEl=$('profile-avatar');
+    if(avatarEl){avatarEl.style.background=profile.color;avatarEl.textContent=(profile.display_name||'?')[0].toUpperCase();}
+    const usernameEl=$('profile-username');
+    if(usernameEl) usernameEl.textContent='@'+profile.username;
+    const joinedEl=$('set-joined-display');
+    if(joinedEl) joinedEl.textContent='Joined '+new Date(profile.created_at).toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
+    const hhEl=$('set-household-display');
+    if(hhEl) hhEl.textContent=profile.households&&profile.households.length>0?'Household: '+profile.households.map(h=>h.name).join(', '):'No household';
   } catch(e) {
     $('set-name').value=currentUser.display_name;$('set-color').value=currentUser.color;
   }
+
+  // Load jobs, goals, tax config for all users
+  loadJobsList();loadGoalsList();loadTaxConfig();loadHouseholds();
   if(currentUser.is_admin){
-    loadUsersList();loadJobsList();loadGoalsList();
+    loadUsersList();loadAuditLog();
     const s=await loadAppSettings();
     $('set-week-start').value=s.pay_week_start_day||'1';
     $('set-pay-period').value=s.pay_period_type||'weekly';
     $('set-anchor').value=s.pay_period_anchor||'';
     toggleAnchor();
-    loadTaxConfig();
     loadTaxProfiles();
+    loadPaycheckHistory();
   }
 }
 
@@ -1303,6 +1383,103 @@ async function applyTaxProfile(){
   $('tp-preview').style.display='none';
 }
 
+// ── Paycheck Entry ────────────────────────────────────────────────────────────
+
+let _lastSavedPaycheckId=null;
+
+function updatePaycheckRates(){
+  const gross=parseFloat($('pc-gross').value)||0;
+  const federal=parseFloat($('pc-federal').value)||0;
+  const state=parseFloat($('pc-state').value)||0;
+  const ss=parseFloat($('pc-ss').value)||0;
+  const medicare=parseFloat($('pc-medicare').value)||0;
+  const preview=$('pc-rates-preview');
+  const grid=$('pc-rates-grid');
+  const applyBtn=$('pc-apply-btn');
+  if(gross<=0){preview.style.display='none';if(applyBtn)applyBtn.style.display='none';return}
+  const items=[
+    {label:'Federal',amount:federal},
+    {label:'State',amount:state},
+    {label:'Social Security',amount:ss},
+    {label:'Medicare',amount:medicare},
+  ];
+  grid.innerHTML=items.map(i=>{
+    const rate=gross>0?(i.amount/gross*100).toFixed(2):'0.00';
+    return `<div><span style="color:var(--text-mute)">${i.label}</span> <strong>${rate}%</strong> <span style="color:var(--text-mute);font-size:.72rem">($${i.amount.toFixed(2)})</span></div>`;
+  }).join('');
+  preview.style.display='block';
+  if(applyBtn&&_lastSavedPaycheckId&&currentUser&&currentUser.is_admin)applyBtn.style.display='';
+}
+
+async function savePaycheck(){
+  const pay_date=gv('pc-date');
+  const gross_pay=parseFloat($('pc-gross').value);
+  const federal_withholding=parseFloat($('pc-federal').value)||0;
+  const state_withholding=parseFloat($('pc-state').value)||0;
+  const social_security=parseFloat($('pc-ss').value)||0;
+  const medicare=parseFloat($('pc-medicare').value)||0;
+  const net_pay=parseFloat($('pc-net').value)||0;
+  const notes=gv('pc-notes');
+  if(!pay_date){toast('Enter a pay date','error');return}
+  if(isNaN(gross_pay)||gross_pay<=0){toast('Enter a valid gross pay amount greater than 0','error');return}
+  const body={pay_date,gross_pay,federal_withholding,state_withholding,social_security,medicare,net_pay,notes};
+  const res=await fetch('/api/paychecks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!res.ok){const d=await res.json();toast(d.error||'Failed to save paycheck','error');return}
+  const data=await res.json();
+  _lastSavedPaycheckId=data.id;
+  toast('Paycheck saved','success');
+  const applyBtn=$('pc-apply-btn');
+  if(applyBtn&&currentUser&&currentUser.is_admin)applyBtn.style.display='';
+  loadPaycheckHistory();
+}
+
+async function applyPaycheckRates(){
+  if(!_lastSavedPaycheckId){toast('Save a paycheck first','error');return}
+  if(!confirm('Apply the effective rates from this paycheck to your Federal, State, Social Security, and Medicare tax config? This will overwrite the current rates.'))return;
+  const res=await fetch('/api/paychecks/'+_lastSavedPaycheckId+'/apply-rates',{method:'POST'});
+  if(!res.ok){const d=await res.json();toast(d.error||'Failed to apply rates','error');return}
+  toast('Rates applied to tax config','success');
+  loadTaxConfig();
+}
+
+async function loadPaycheckHistory(){
+  const paychecks=await fetch('/api/paychecks').then(r=>r.json());
+  const el=$('pc-history-list');
+  if(!paychecks.length){el.innerHTML='<p style="font-size:.8rem;color:var(--text-mute);font-family:var(--mono)">No paycheck entries yet.</p>';return}
+  el.innerHTML=paychecks.map(p=>{
+    const gross=p.gross_pay||0;
+    const total_withholding=p.federal_withholding+p.state_withholding+p.social_security+p.medicare;
+    const effRate=gross>0?(total_withholding/gross*100).toFixed(1):'0.0';
+    return `<div class="user-card" style="margin-bottom:8px;flex-wrap:wrap;gap:6px">
+      <div class="user-info" style="flex:1;min-width:0">
+        <strong>${esc(p.pay_date)}</strong>
+        <small style="font-family:var(--mono)">Gross $${gross.toFixed(2)} · Net $${p.net_pay.toFixed(2)} · Eff. rate ${effRate}%${p.notes?' · '+esc(p.notes):''}</small>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
+        ${currentUser&&currentUser.is_admin?`<button class="btn btn-ghost btn-sm" onclick="applyHistoryPaycheckRates(${p.id})">Apply Rates</button>`:''}
+        <button class="btn btn-danger btn-sm" onclick="deletePaycheck(${p.id})">×</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function applyHistoryPaycheckRates(id){
+  if(!confirm('Apply the effective rates from this paycheck to your Federal, State, Social Security, and Medicare tax config? This will overwrite the current rates.'))return;
+  const res=await fetch('/api/paychecks/'+id+'/apply-rates',{method:'POST'});
+  if(!res.ok){const d=await res.json();toast(d.error||'Failed to apply rates','error');return}
+  toast('Rates applied to tax config','success');
+  loadTaxConfig();
+}
+
+async function deletePaycheck(id){
+  if(!confirm('Delete this paycheck entry?'))return;
+  const res=await fetch('/api/paychecks/'+id,{method:'DELETE'});
+  if(!res.ok){const d=await res.json();toast(d.error||'Failed to delete','error');return}
+  toast('Paycheck deleted','success');
+  if(_lastSavedPaycheckId===id){_lastSavedPaycheckId=null;const btn=$('pc-apply-btn');if(btn)btn.style.display='none';}
+  loadPaycheckHistory();
+}
+
 
 function renderPaycheckCard(p){
   if(!p||!p.period){$('paycheck-card').innerHTML='';return}
@@ -1327,16 +1504,35 @@ function renderPaycheckCard(p){
     </div>`;
 }
 
+function validatePasswordFields(pw,confirm){
+  if(!pw||!confirm){toast('Fill all password fields','error');return false}
+  if(pw!==confirm){toast('Passwords do not match','error');return false}
+  if(pw.length<8){toast('Password must be at least 8 characters','error');return false}
+  return true;
+}
+
 async function saveProfile(){
-  const body={display_name:gv('set-name'),color:gv('set-color'),email:emailOrNull('set-email')};
-  const pass=gv('set-pass');if(pass)body.password=pass;
+  const body={display_name:gv('set-name'),color:gv('set-color')};
   const res=await fetch('/api/users/'+currentUser.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const data=await res.json();
   if(!res.ok){toast(data.error||'Failed to save profile','error');return}
   currentUser.display_name=data.user.display_name;currentUser.color=data.user.color;
-  $('set-avatar-dot').style.background=currentUser.color;
+  const avatarEl=$('profile-avatar');
+  if(avatarEl){avatarEl.style.background=currentUser.color;avatarEl.textContent=(currentUser.display_name||'?')[0].toUpperCase();}
   $('topbar-user').innerHTML=`<span class="user-dot" style="background:${currentUser.color}"></span>${esc(currentUser.display_name)}`;
-  sv('set-pass','');toast('Profile saved','success');
+  toast('Profile saved','success');
+}
+
+async function changePassword(){
+  const current=gv('pw-current'),np=gv('pw-new'),confirm=gv('pw-confirm');
+  if(!current){toast('Enter your current password','error');return}
+  if(!validatePasswordFields(np,confirm))return;
+  const res=await fetch('/api/auth/change-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({current_password:current,new_password:np})});
+  const data=await res.json();
+  if(!res.ok){toast(data.error||'Password change failed','error');return}
+  sv('pw-current','');sv('pw-new','');sv('pw-confirm','');
+  toast('Password changed — please log in again','success');
+  setTimeout(()=>window.location.reload(),1500);
 }
 
 async function loadUsersList(){
@@ -1344,12 +1540,42 @@ async function loadUsersList(){
   $('users-list').innerHTML=users.map(u=>`
     <div class="user-card">
       <span class="user-dot" style="background:${u.color}"></span>
-      <div class="user-info"><strong>${esc(u.display_name)}</strong><small>@${esc(u.username)}${u.email?' · '+esc(u.email):''}${u.is_admin?' · Admin':''}</small></div>
-      ${u.id!==currentUser.id
-        ?`<button class="btn btn-ghost btn-sm" onclick="openUserModal(${u.id})">Edit</button><button class="btn btn-ghost btn-sm" onclick="toggleAdmin(${u.id},${u.is_admin?0:1})">${u.is_admin?'Demote':'Promote'}</button><button class="btn btn-danger" onclick="deleteUser(${u.id})">Delete</button>`
-        :'<span style="font-family:var(--mono);font-size:.7rem;color:var(--text-mute)">You</span>'}
+      <div class="user-info"><strong>${esc(u.display_name)}</strong><small>@${esc(u.username)} ${u.is_admin?'· Admin':''}</small></div>
+      ${u.id!==currentUser.id?`<div style="display:flex;gap:6px"><button class="btn btn-ghost btn-sm" onclick="openUserModal(${u.id})">Edit</button><button class="btn btn-ghost btn-sm" onclick="toggleAdmin(${u.id},${u.is_admin?0:1})">${u.is_admin?'Demote':'Promote'}</button><button class="btn btn-ghost btn-sm" onclick="openResetPwModal(${u.id},'${esc(u.username)}')">Reset PW</button><button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id})">Delete</button></div>`:'<span style="font-family:var(--mono);font-size:.7rem;color:var(--text-mute)">You</span>'}
     </div>
   `).join('');
+}
+
+function openResetPwModal(id,username){
+  $('reset-pw-user-id').value=id;
+  $('reset-pw-user-label').textContent='Resetting password for: @'+username;
+  $('reset-pw-new').value='';$('reset-pw-confirm').value='';
+  $('reset-pw-modal').classList.add('open');
+}
+
+function closeResetPwModal(){
+  $('reset-pw-modal').classList.remove('open');
+}
+
+async function submitAdminResetPw(){
+  const id=parseInt($('reset-pw-user-id').value,10);
+  const np=gv('reset-pw-new'),confirm=gv('reset-pw-confirm');
+  if(!validatePasswordFields(np,confirm))return;
+  const res=await fetch('/api/users/'+id+'/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({new_password:np})});
+  const data=await res.json();
+  if(!res.ok){toast(data.error||'Reset failed','error');return}
+  closeResetPwModal();
+  toast(data.message||'Password reset successfully','success');
+  loadAuditLog();
+}
+
+async function loadAuditLog(){
+  const el=$('audit-log-list');if(!el)return;
+  try{
+    const rows=await fetch('/api/audit-log').then(r=>r.json());
+    if(!rows.length){el.textContent='No admin actions recorded yet.';return}
+    el.innerHTML=rows.map(r=>`<div style="padding:6px 0;border-bottom:1px solid var(--border)"><span style="color:var(--amber)">${esc(r.actor_username)}</span> → <span style="color:var(--green)">${esc(r.target_username)}</span>: ${esc(r.detail)} <span style="color:var(--text-mute);float:right">${r.created_at.replace('T',' ').substring(0,16)}</span></div>`).join('');
+  }catch(e){el.textContent='Could not load audit log.';}
 }
 
 async function addUser(){
@@ -1376,14 +1602,14 @@ async function openUserModal(id){
   const user=await fetch('/api/users/'+id).then(r=>r.json());
   $('eu-id').value=user.id;
   $('eu-name').value=user.display_name;
-  $('eu-email').value=user.email||'';
   $('eu-color').value=user.color;
-  $('eu-pass').value='';
-  $('eu-avatar-dot').style.background=user.color;
+  const avatarEl=$('eu-avatar');
+  if(avatarEl){avatarEl.style.background=user.color;avatarEl.textContent=(user.display_name||'?')[0].toUpperCase();}
   $('eu-username-display').textContent='@'+user.username;
   $('eu-role-display').textContent=user.is_admin?'Administrator':'User';
   $('eu-joined-display').textContent='Joined '+new Date(user.created_at).toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
-  $('eu-household-display').textContent='Household: '+(user.household?user.household:'None');
+  const hhText=user.households&&user.households.length>0?'Household: '+user.households.map(h=>h.name).join(', '):'No household';
+  $('eu-household-display').textContent=hhText;
   $('user-edit-modal').classList.add('open');
 }
 
@@ -1392,8 +1618,7 @@ $('user-edit-modal').addEventListener('click',function(e){if(e.target===this)clo
 
 async function saveUserEdit(){
   const id=parseInt($('eu-id').value,10);
-  const body={display_name:$('eu-name').value.trim(),color:$('eu-color').value,email:emailOrNull('eu-email')};
-  const pass=$('eu-pass').value;if(pass)body.password=pass;
+  const body={display_name:$('eu-name').value.trim(),color:$('eu-color').value};
   const res=await fetch('/api/users/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const data=await res.json();
   if(!res.ok){toast(data.error||'Failed to save','error');return}
@@ -1402,13 +1627,15 @@ async function saveUserEdit(){
 
 async function loadJobsList(){
   const jobs=await fetch('/api/jobs').then(r=>r.json());
-  $('jobs-list').innerHTML=jobs.map(j=>`
-    <div class="user-card"><span class="user-dot" style="background:${j.color}"></span>
-    <div class="user-info"><strong>${esc(j.name)}</strong><small>$${j.default_rate.toFixed(2)}/hr · OT ${j.overtime_threshold||40}h @ ${j.overtime_multiplier||1.5}x · Tips: ${j.tip_payment==='paycheck'?'Paycheck':'Cash'}${j.archived?' · Archived':''}</small></div>
+  $('jobs-list').innerHTML=jobs.map(j=>{
+    const isOwner=!j.user_id||j.user_id===currentUser.id||currentUser.is_admin;
+    const ownerLabel=j.user_id===null?'<span style="font-size:.65rem;color:var(--amber);font-family:var(--mono);margin-left:4px">global</span>':'';
+    return `<div class="user-card"><span class="user-dot" style="background:${j.color}"></span>
+    <div class="user-info"><strong>${esc(j.name)}</strong>${ownerLabel}<small>$${j.default_rate.toFixed(2)}/hr · OT ${j.overtime_threshold||40}h @ ${j.overtime_multiplier||1.5}x · Tips: ${j.tip_payment==='paycheck'?'Paycheck':'Cash'}${j.archived?' · Archived':''}</small></div>
     <div style="display:flex;gap:6px">
-      ${!j.archived?`<button class="btn btn-ghost btn-sm" onclick="editJob(${j.id})">Edit</button><button class="btn btn-danger btn-sm" onclick="deleteJob(${j.id},'${j.name.replace(/'/g,"\\'")}')">Delete</button>`:'<small style="opacity:.5">Archived</small>'}
-    </div></div>
-  `).join('');
+      ${!j.archived&&isOwner?`<button class="btn btn-ghost btn-sm" onclick="editJob(${j.id})">Edit</button><button class="btn btn-danger btn-sm" onclick="deleteJob(${j.id},'${j.name.replace(/'/g,"\\'")}')">Delete</button>`:'<small style="opacity:.5">'+(j.archived?'Archived':'Read-only')+'</small>'}
+    </div></div>`;
+  }).join('');
 }
 
 async function addJob(){
@@ -1450,10 +1677,12 @@ async function deleteJob(id,name){
 
 async function loadGoalsList(){
   const goals=await fetch('/api/goals').then(r=>r.json());
-  $('goals-list').innerHTML=goals.map(g=>`
-    <div class="user-card"><div class="user-info"><strong>${g.period} — $${g.target_amount.toFixed(0)}</strong><small>${g.active?'Active':'Inactive'}</small></div>
-    <button class="btn btn-danger" onclick="deleteGoal(${g.id})">Delete</button></div>
-  `).join('')||'<p class="empty">No goals set.</p>';
+  $('goals-list').innerHTML=goals.map(g=>{
+    const isOwner=!g.user_id||g.user_id===currentUser.id||currentUser.is_admin;
+    return `<div class="user-card"><div class="user-info"><strong>${g.period} — $${g.target_amount.toFixed(0)}</strong><small>${g.active?'Active':'Inactive'}</small></div>
+    ${isOwner?`<button class="btn btn-danger" onclick="deleteGoal(${g.id})">Delete</button>`:'<small style="opacity:.5">Read-only</small>'}
+    </div>`;
+  }).join('')||'<p class="empty">No goals set.</p>';
 }
 
 async function addGoal(){
@@ -1465,6 +1694,57 @@ async function addGoal(){
 
 async function deleteGoal(id){
   await fetch('/api/goals/'+id,{method:'DELETE'});toast('Goal deleted','success');loadGoalsList();
+}
+
+// ── Households ──
+async function loadHouseholds(){
+  const households=await fetch('/api/households').then(r=>r.json());
+  const el=$('household-list');
+  if(!el)return;
+  if(!households.length){el.innerHTML='<p class="empty" style="margin-bottom:8px">No households yet. Create one or join with an invite code.</p>';return;}
+  el.innerHTML=households.map(h=>`
+    <div class="user-card" style="margin-bottom:10px">
+      <div class="user-info" style="flex:1">
+        <strong>${esc(h.name)}</strong>
+        <small>${h.member_count} member${h.member_count!==1?'s':''}</small>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <span style="font-family:var(--mono);font-size:.7rem;color:var(--text-dim);background:var(--surface2);padding:3px 8px;border-radius:4px" title="Share this code with family members">Code: ${esc(h.invite_code)}</span>
+        <button class="btn btn-ghost btn-sm" onclick="showHouseholdMembers(${h.id},'${esc(h.name)}')">Members</button>
+        <button class="btn btn-danger btn-sm" onclick="leaveHousehold(${h.id},'${esc(h.name)}')">Leave</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function createHousehold(){
+  const name=gv('hh-name');
+  if(!name){toast('Enter a household name','error');return}
+  const res=await fetch('/api/households',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
+  if(!res.ok){const d=await res.json();toast(d.error||'Failed to create household','error');return}
+  sv('hh-name','');toast('Household created!','success');loadHouseholds();
+}
+
+async function joinHousehold(){
+  const invite_code=gv('hh-invite');
+  if(!invite_code){toast('Enter an invite code','error');return}
+  const res=await fetch('/api/households/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({invite_code})});
+  const d=await res.json();
+  if(!res.ok){toast(d.error||'Failed to join household','error');return}
+  sv('hh-invite','');toast('Joined household: '+d.household.name,'success');loadHouseholds();
+}
+
+async function leaveHousehold(id,name){
+  if(!confirm('Leave "'+name+'"? You will no longer see shared data from this household.'))return;
+  const res=await fetch('/api/households/'+id+'/leave',{method:'DELETE'});
+  if(!res.ok){const d=await res.json();toast(d.error||'Failed to leave','error');return}
+  toast('Left household','success');loadHouseholds();
+}
+
+async function showHouseholdMembers(id,name){
+  const members=await fetch('/api/households/'+id+'/members').then(r=>r.json());
+  const list=members.map(m=>`• ${m.display_name} (@${m.username})`).join('\n');
+  alert('Members of "'+name+'":\n\n'+list);
 }
 
 // ── Toast ──
