@@ -1219,7 +1219,7 @@ async function loadSettings(){
     const roleEl=$('profile-role');
     if(roleEl) roleEl.textContent=profile.is_admin?'Administrator':'User';
     const avatarEl=$('profile-avatar');
-    if(avatarEl){avatarEl.style.background=profile.color;avatarEl.textContent=(profile.display_name||'?')[0].toUpperCase();}
+    if(avatarEl){avatarEl.style.background=profile.color;avatarEl.textContent=((profile.display_name||'').trim()||'?')[0].toUpperCase();}
     const usernameEl=$('profile-username');
     if(usernameEl) usernameEl.textContent='@'+profile.username;
     const joinedEl=$('set-joined-display');
@@ -1518,7 +1518,7 @@ async function saveProfile(){
   if(!res.ok){toast(data.error||'Failed to save profile','error');return}
   currentUser.display_name=data.user.display_name;currentUser.color=data.user.color;
   const avatarEl=$('profile-avatar');
-  if(avatarEl){avatarEl.style.background=currentUser.color;avatarEl.textContent=(currentUser.display_name||'?')[0].toUpperCase();}
+  if(avatarEl){avatarEl.style.background=currentUser.color;avatarEl.textContent=((currentUser.display_name||'').trim()||'?')[0].toUpperCase();}
   $('topbar-user').innerHTML=`<span class="user-dot" style="background:${currentUser.color}"></span>${esc(currentUser.display_name)}`;
   toast('Profile saved','success');
 }
@@ -1604,7 +1604,7 @@ async function openUserModal(id){
   $('eu-name').value=user.display_name;
   $('eu-color').value=user.color;
   const avatarEl=$('eu-avatar');
-  if(avatarEl){avatarEl.style.background=user.color;avatarEl.textContent=(user.display_name||'?')[0].toUpperCase();}
+  if(avatarEl){avatarEl.style.background=user.color;avatarEl.textContent=((user.display_name||'').trim()||'?')[0].toUpperCase();}
   $('eu-username-display').textContent='@'+user.username;
   $('eu-role-display').textContent=user.is_admin?'Administrator':'User';
   $('eu-joined-display').textContent='Joined '+new Date(user.created_at).toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});

@@ -612,6 +612,9 @@ const RegisterSchema = z.object({
 const UpdateProfileSchema = z.object({
   display_name: z.string().min(1).max(100).optional(),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+});
+
+const AdminUpdateProfileSchema = UpdateProfileSchema.extend({
   is_admin: z.boolean().optional(),
 });
 
@@ -867,7 +870,10 @@ app.get('/api/users/:id', authMiddleware, profileRateLimit, (req, res) => {
   res.json({ ...user, is_admin: !!user.is_admin, households });
 });
 
-app.put('/api/users/:id', authMiddleware, profileRateLimit, validate(UpdateProfileSchema), async (req, res) => {
+app.put('/api/users/:id', authMiddleware, profileRateLimit, (req, res, next) => {
+  const isAdmin = req.user && req.user.is_admin;
+  return (isAdmin ? validate(AdminUpdateProfileSchema) : validate(UpdateProfileSchema))(req, res, next);
+}, async (req, res) => {
   try {
     const targetId = parseInt(req.params.id, 10);
     const isOwnProfile = req.user && req.user.id === targetId;
