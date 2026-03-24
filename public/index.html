@@ -1035,8 +1035,7 @@ function calculateTipouts(totalTips,employees){
     userId:employee.userId||null,
     hours:employee.hours,
     tipPerHour,
-    tipoutTruncated:truncateToTwoDec(employee.hours*tipPerHour),
-    tipoutRounded:roundWholeDollar(truncateToTwoDec(employee.hours*tipPerHour))
+    tipoutTruncated:truncateToTwoDec(employee.hours*tipPerHour)
   }));
   return{
     employees:calculatedEmployees,
@@ -1052,7 +1051,7 @@ function renderTipCalculatorResult(result){
       <td>${esc(emp.name)}</td>
       <td>${formatFixed(emp.hours)} hrs</td>
       <td>${formatTruncatedMoney(emp.tipPerHour)}/hr</td>
-      <td>${formatRoundedDollar(emp.tipoutRounded)}</td>
+      <td>${formatTruncatedMoney(emp.tipoutTruncated)}</td>
     </tr>
   `).join('');
   return `
@@ -1070,7 +1069,7 @@ function renderTipCalculatorResult(result){
               <td class="td-total">Total</td>
               <td class="td-total">${formatFixed(result.totalHours)} hrs</td>
               <td class="td-total">—</td>
-              <td class="td-total">${formatTruncatedMoney(result.totalTipsRounded)}</td>
+              <td class="td-total">${formatRoundedDollar(result.totalTipsRounded)}</td>
             </tr>
           </tbody>
         </table>
@@ -1140,7 +1139,7 @@ async function createShiftFromTipCalculator(){
   if(!myRow){setTipCalcError('Add yourself to the calculator before saving your shift.');return}
   const job=jobsCache.find(j=>j.id===jobId);
   if(!job||job.archived){setTipCalcError('Selected job is unavailable.');return}
-  const savedTip=job.tip_calc_round?myRow.tipoutRounded:myRow.tipoutTruncated;
+  const savedTip=job.tip_calc_round?roundWholeDollar(myRow.tipoutTruncated):myRow.tipoutTruncated;
   const body={date:today(),hourly_rate:Number(job.default_rate)||0,hours_worked:myRow.hours,tip_mode:'total',tip_input:savedTip,notes:'Created from tip calculator',job_id:jobId};
   const res=await fetch('/api/shifts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const data=await res.json();
