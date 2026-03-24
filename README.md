@@ -10,6 +10,7 @@ Designed to run as a Proxmox LXC container and exposed via Cloudflare Tunnel.
 - **Multi-user auth** — admin-managed accounts with password hashing (scrypt), signed session cookies, and role-based access
 - **Log shifts** — hourly rate × hours worked, plus tips (enter as night total *or* per-hour rate); assign to jobs
 - **Employers + jobs** — manage multiple employers, assign jobs to employers, and mark employers as no-tax
+- **Fixed recurring income** — track recurring non-shift income (weekly, bi-weekly, semi-monthly, monthly, or custom schedules)
 - **Live preview** — wages / tips / grand total update as you type
 - **Shift templates** — save and load recurring shift configurations
 - **Dashboard** — summary cards with period comparisons (% change arrows), day-of-week earnings heatmap, goal progress bars
@@ -124,6 +125,8 @@ Press `?` in the app to open the shortcuts overlay at any time.
 **Shifts**: `GET /api/shifts`, `POST /api/shifts`, `PUT /api/shifts/:id`, `DELETE /api/shifts/:id`, `POST /api/shifts/:id/restore`
 
 **Employers**: `GET /api/employers`, `POST /api/employers`, `PUT /api/employers/:id`, `DELETE /api/employers/:id`
+
+**Fixed Income**: `GET /api/fixed-incomes`, `POST /api/fixed-incomes`, `PUT /api/fixed-incomes/:id`, `DELETE /api/fixed-incomes/:id`
 
 **Jobs**: `GET /api/jobs`, `POST /api/jobs`, `PUT /api/jobs/:id`, `DELETE /api/jobs/:id`
 

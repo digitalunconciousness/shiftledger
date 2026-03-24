@@ -506,6 +506,21 @@ canvas{max-height:280px}
         </div>
       </div>
       <div class="card" style="margin-bottom:20px">
+        <div class="card-label" style="margin-bottom:12px">My Fixed Income</div>
+        <div id="fixed-incomes-list"></div>
+        <div class="divider"></div>
+        <div class="form-grid">
+          <div class="form-group"><label>Employer (optional)</label><select id="nfi-employer"><option value="">— No Employer —</option></select></div>
+          <div class="form-group"><label>Amount ($)</label><input type="number" id="nfi-amount" step="0.01" min="0.01" placeholder="1200.00"></div>
+          <div class="form-group"><label>Recurrence</label><select id="nfi-recurrence" onchange="toggleFixedIncomeOptions()"><option value="weekly">Weekly</option><option value="biweekly">Bi-Weekly</option><option value="semimonthly">Semi-Monthly</option><option value="monthly">Monthly</option><option value="custom">Custom</option></select></div>
+          <div class="form-group"><label>Anchor Date (if used)</label><input type="date" id="nfi-anchor"></div>
+          <div class="form-group full" id="nfi-semimonthly-group" style="display:none"><label>Semi-Monthly Days (e.g., 1,15)</label><input id="nfi-semimonthly-days" placeholder="1,15"></div>
+          <div class="form-group full" id="nfi-custom-group" style="display:none"><label>Custom: Interval Days or Specific Dates</label><input id="nfi-custom-interval" type="number" min="1" step="1" placeholder="Interval in days (optional)"><input id="nfi-custom-dates" style="margin-top:8px" placeholder="YYYY-MM-DD,YYYY-MM-DD"></div>
+          <div class="form-group full"><label>Notes (optional)</label><input id="nfi-notes" maxlength="500" placeholder="Salary, stipend, recurring payment, etc."></div>
+          <div class="form-group" style="justify-content:flex-end;display:flex;gap:8px"><button class="btn btn-primary btn-sm" id="nfi-save-btn" onclick="saveFixedIncome()">Add Fixed Income</button><button class="btn btn-ghost btn-sm" id="nfi-cancel-btn" onclick="cancelFixedIncomeEdit()" style="display:none">Cancel</button></div>
+        </div>
+      </div>
+      <div class="card" style="margin-bottom:20px">
         <div class="card-label" style="margin-bottom:12px">My Jobs</div>
         <div id="jobs-list"></div>
         <div class="divider"></div>
@@ -835,6 +850,8 @@ let histFilterUser='mine';
 let jobsCache=[];
 let employersCache=[];
 let templatesCache=[];
+let fixedIncomesCache=[];
+let editingFixedIncomeId=null;
 
 // ── Init ──
 document.addEventListener('DOMContentLoaded',()=>{
@@ -922,8 +939,49 @@ function formatMoneyTick(value){return '$'+formatFixed(value)}
 function setDecimalValue(id,value,digits=2){if(value===null||value===undefined||value===''){sv(id,'');return}sv(id,formatFixed(value,digits))}
 function formatDecimalInput(input,digits=2){if(!input||input.value==='')return;const number=Number(input.value);if(!Number.isFinite(number))return;input.value=number.toFixed(digits)}
 function attachDecimalInput(id,digits=2){const input=$(id);if(!input)return;input.addEventListener('blur',()=>formatDecimalInput(input,digits))}
-function setupDecimalInputs(){['f-rate','f-hours','f-tips','e-rate','e-hours','e-tips','nj-rate','ng-amount','ntc-rate','ntc-flat','ej-rate','ej-ot-threshold','ej-ot-multiplier','tip-calc-total'].forEach(id=>attachDecimalInput(id,2))}
+function setupDecimalInputs(){
+  [
+    'f-rate','f-hours','f-tips',
+    'e-rate','e-hours','e-tips',
+    'nj-rate','ng-amount',
+    'ntc-rate','ntc-flat',
+    'ej-rate','ej-ot-threshold','ej-ot-multiplier',
+    'tip-calc-total',
+    'nfi-amount',
+  ].forEach(id=>attachDecimalInput(id,2));
+}
 function formatJobDisplayName(job){return job.employer_name?`${job.employer_name} — ${job.name}`:job.name}
+
+function fixedIncomeScheduleLabel(fi){
+  const recurrenceMap={weekly:'Weekly',biweekly:'Bi-Weekly',semimonthly:'Semi-Monthly',monthly:'Monthly',custom:'Custom'};
+  if(fi.recurrence==='semimonthly'){
+    return `Semi-Monthly (${fi.semimonthly_day1||'?'} & ${fi.semimonthly_day2||'?'})`;
+  }
+  if(fi.recurrence==='custom'){
+    const parts=[];
+    if(fi.custom_interval_days)parts.push(`Every ${fi.custom_interval_days} day${fi.custom_interval_days===1?'':'s'}`);
+    if(fi.custom_dates)parts.push(`Dates: ${fi.custom_dates}`);
+    if(fi.anchor_date)parts.push(`Anchor ${fi.anchor_date}`);
+    return `Custom${parts.length?' · '+parts.join(' · '):''}`;
+  }
+  return recurrenceMap[fi.recurrence]||'Unknown';
+}
+
+function parseSemiMonthlyDays(raw){
+  const parts=(raw||'').split(',').map(s=>s.trim()).filter(Boolean);
+  if(parts.length!==2)return null;
+  const day1=parseInt(parts[0],10),day2=parseInt(parts[1],10);
+  if(!Number.isInteger(day1)||!Number.isInteger(day2)||day1<1||day1>31||day2<1||day2>31||day1===day2)return null;
+  return {day1,day2};
+}
+
+function toggleFixedIncomeOptions(){
+  const recurrence=gv('nfi-recurrence');
+  const semi=$('nfi-semimonthly-group');
+  const custom=$('nfi-custom-group');
+  if(semi)semi.style.display=recurrence==='semimonthly'?'':'none';
+  if(custom)custom.style.display=recurrence==='custom'?'':'none';
+}
 
 // ── Navigation ──
 const viewKeys=['log','dashboard','history','reports','settings'];
@@ -1201,6 +1259,7 @@ async function loadEmployers(){
   const opts='<option value="">— No Employer —</option>'+employersCache.filter(e=>!e.archived).map(e=>`<option value="${e.id}">${esc(e.name)}${e.no_tax?' (No Tax)':''}</option>`).join('');
   const ne=$('nj-employer'); if(ne) ne.innerHTML=opts;
   const ee=$('ej-employer'); if(ee) ee.innerHTML=opts;
+  const nfi=$('nfi-employer'); if(nfi) nfi.innerHTML=opts;
 }
 
 function onJobChange(){
@@ -1553,7 +1612,7 @@ async function loadSettings(){
   }
 
   // Load employers, jobs, goals, tax config for all users
-  loadEmployersList();loadJobsList();loadGoalsList();loadTaxConfig();loadHouseholds();
+  loadEmployersList();loadFixedIncomesList();loadJobsList();loadGoalsList();loadTaxConfig();loadHouseholds();
   if(currentUser.is_admin){
     loadUsersList();loadAuditLog();
     const s=await loadAppSettings();
@@ -1979,6 +2038,112 @@ async function loadEmployersList(){
   loadEmployers();
 }
 
+function fixedIncomeFormBodyFromInputs(prefix='nfi'){
+  const employerValue=gv(prefix+'-employer');
+  const amount=parseFloat(gv(prefix+'-amount'));
+  const recurrence=gv(prefix+'-recurrence');
+  const anchor_date=gv(prefix+'-anchor')||'';
+  const notes=gv(prefix+'-notes')||'';
+  let semimonthly_day1=null,semimonthly_day2=null,custom_interval_days=null,custom_dates='';
+  if(recurrence==='semimonthly'){
+    const parsed=parseSemiMonthlyDays(gv(prefix+'-semimonthly-days'));
+    if(!parsed)return { error:'Enter two different semi-monthly days like 1,15' };
+    semimonthly_day1=parsed.day1;semimonthly_day2=parsed.day2;
+  }
+  if(recurrence==='custom'){
+    const rawInterval=gv(prefix+'-custom-interval');
+    custom_interval_days=rawInterval?parseInt(rawInterval,10):null;
+    custom_dates=gv(prefix+'-custom-dates');
+    if(!custom_interval_days&&!custom_dates.trim()) return { error:'For custom recurrence, enter interval days or specific dates' };
+    if(custom_interval_days&&(!Number.isInteger(custom_interval_days)||custom_interval_days<1)) return { error:'Custom interval must be a positive whole number' };
+  }
+  if((recurrence==='weekly'||recurrence==='biweekly'||recurrence==='monthly')&&!anchor_date){
+    return { error:'Anchor date is required for weekly/biweekly/monthly recurrence' };
+  }
+  if(!Number.isFinite(amount)||amount<=0) return { error:'Amount must be greater than 0' };
+  return {
+    body:{
+      employer_id:employerValue===''?null:parseInt(employerValue,10),
+      amount,recurrence,anchor_date,semimonthly_day1,semimonthly_day2,custom_interval_days,custom_dates,notes
+    }
+  };
+}
+
+function clearFixedIncomeForm(){
+  sv('nfi-employer','');
+  sv('nfi-amount','');
+  sv('nfi-recurrence','weekly');
+  sv('nfi-anchor','');
+  sv('nfi-semimonthly-days','');
+  sv('nfi-custom-interval','');
+  sv('nfi-custom-dates','');
+  sv('nfi-notes','');
+  toggleFixedIncomeOptions();
+}
+
+function refreshFixedIncomeFormMode(){
+  const saveBtn=$('nfi-save-btn');
+  const cancelBtn=$('nfi-cancel-btn');
+  if(saveBtn)saveBtn.textContent=editingFixedIncomeId===null?'Add Fixed Income':'Save Fixed Income';
+  if(cancelBtn)cancelBtn.style.display=editingFixedIncomeId===null?'none':'';
+}
+
+function cancelFixedIncomeEdit(){
+  editingFixedIncomeId=null;
+  clearFixedIncomeForm();
+  refreshFixedIncomeFormMode();
+}
+
+async function loadFixedIncomesList(){
+  const list=await fetch('/api/fixed-incomes').then(r=>r.json());
+  fixedIncomesCache=list;
+  $('fixed-incomes-list').innerHTML=list.map(fi=>{
+    const canEdit=fi.user_id===currentUser.id||currentUser.is_admin;
+    const employer=fi.employer_name?` · ${esc(fi.employer_name)}`:' · No Employer';
+    const scheduleLabel=fixedIncomeScheduleLabel(fi);
+    return `<div class="user-card"><div class="user-info"><strong>$${Number(fi.amount).toFixed(2)}</strong><small>${esc(scheduleLabel)}${employer}${fi.notes?' · '+esc(fi.notes):''}</small></div>
+      <div style="display:flex;gap:6px">${canEdit?`<button class="btn btn-ghost btn-sm" onclick="editFixedIncome(${fi.id})">Edit</button><button class="btn btn-danger btn-sm" onclick="deleteFixedIncome(${fi.id})">Delete</button>`:''}</div></div>`;
+  }).join('')||'<p class="empty">No fixed income entries yet.</p>';
+  refreshFixedIncomeFormMode();
+}
+
+async function saveFixedIncome(){
+  const parsed=fixedIncomeFormBodyFromInputs('nfi');
+  if(parsed.error){toast(parsed.error,'error');return}
+  const isEdit=editingFixedIncomeId!==null;
+  const url=isEdit?('/api/fixed-incomes/'+editingFixedIncomeId):'/api/fixed-incomes';
+  const method=isEdit?'PUT':'POST';
+  const res=await fetch(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(parsed.body)});
+  if(!res.ok){const d=await res.json();toast(d.error||(isEdit?'Failed to update fixed income':'Failed to add fixed income'),'error');return}
+  cancelFixedIncomeEdit();
+  toast(isEdit?'Fixed income updated':'Fixed income added','success');
+  loadFixedIncomesList();loadDashboard();
+}
+
+async function editFixedIncome(id){
+  const fi=fixedIncomesCache.find(x=>x.id===id);
+  if(!fi){toast('Fixed income not found','error');return}
+  sv('nfi-employer',fi.employer_id||'');
+  setDecimalValue('nfi-amount',fi.amount);
+  sv('nfi-recurrence',fi.recurrence||'weekly');
+  sv('nfi-anchor',fi.anchor_date||'');
+  sv('nfi-semimonthly-days',fi.semimonthly_day1&&fi.semimonthly_day2?`${fi.semimonthly_day1},${fi.semimonthly_day2}`:'');
+  sv('nfi-custom-interval',fi.custom_interval_days||'');
+  sv('nfi-custom-dates',fi.custom_dates||'');
+  sv('nfi-notes',fi.notes||'');
+  toggleFixedIncomeOptions();
+  editingFixedIncomeId=id;
+  refreshFixedIncomeFormMode();
+}
+
+async function deleteFixedIncome(id){
+  if(!confirm('Delete this fixed income entry?'))return;
+  const res=await fetch('/api/fixed-incomes/'+id,{method:'DELETE'});
+  if(!res.ok){const d=await res.json();toast(d.error||'Failed to delete fixed income','error');return}
+  toast('Fixed income deleted','success');
+  loadFixedIncomesList();loadDashboard();
+}
+
 async function addEmployer(){
   const name=gv('ne-name');
   const no_tax=$('ne-no-tax').checked;
@@ -1987,7 +2152,10 @@ async function addEmployer(){
   if(!res.ok){const d=await res.json();toast(d.error||'Failed to add employer','error');return}
   sv('ne-name','');$('ne-no-tax').checked=false;
   toast('Employer added','success');
-  loadEmployersList();loadJobsList();loadJobs();
+  loadEmployersList();
+  loadJobsList();
+  loadJobs();
+  loadFixedIncomesList();
 }
 
 function openEmployerModal(id,name,noTax){
@@ -2014,7 +2182,11 @@ async function saveEmployerEdit(){
   if(!res.ok){const d=await res.json();toast(d.error||'Failed to update employer','error');return}
   closeEmployerModal();
   toast('Employer updated','success');
-  loadEmployersList();loadJobsList();loadJobs();loadDashboard();
+  loadEmployersList();
+  loadJobsList();
+  loadJobs();
+  loadFixedIncomesList();
+  loadDashboard();
 }
 
 async function deleteEmployer(id,name){
@@ -2022,7 +2194,11 @@ async function deleteEmployer(id,name){
   const res=await fetch('/api/employers/'+id,{method:'DELETE'});
   if(!res.ok){const d=await res.json();toast(d.error||'Failed to delete employer','error');return}
   toast('Employer deleted','success');
-  loadEmployersList();loadJobsList();loadJobs();loadDashboard();
+  loadEmployersList();
+  loadJobsList();
+  loadJobs();
+  loadFixedIncomesList();
+  loadDashboard();
 }
 
 $('employer-edit-modal').addEventListener('click',function(e){if(e.target===this)closeEmployerModal()});
