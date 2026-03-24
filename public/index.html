@@ -176,6 +176,16 @@ canvas{max-height:280px}
 .close-btn:hover{color:var(--text);background:var(--surface2)}
 .divider{height:1px;background:var(--border);margin:24px 0}
 .empty{padding:48px;text-align:center;color:var(--text-mute);font-family:var(--mono);font-size:.85rem}
+.modal.tipcalc-modal{width:760px}
+.tipcalc-error{display:none;margin-bottom:12px;padding:10px 12px;border:1px solid #4b2323;background:#2c1818;border-radius:var(--radius);color:var(--red);font-family:var(--mono);font-size:.78rem}
+.tipcalc-error.open{display:block}
+.tipcalc-rows{display:flex;flex-direction:column;gap:10px}
+.tipcalc-employee-row{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) auto;gap:10px;align-items:end}
+.tipcalc-result{margin-top:16px}
+.tipcalc-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:12px}
+.tipcalc-meta-card{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px}
+.tipcalc-meta-card .label{font-size:.66rem;letter-spacing:.08em;text-transform:uppercase;font-family:var(--mono);color:var(--text-dim);margin-bottom:4px}
+.tipcalc-meta-card .value{font-family:var(--mono);font-size:1rem;font-weight:600}
 
 /* ── Shortcut Help ── */
 .shortcut-overlay{position:fixed;inset:0;background:rgba(0,0,0,.8);display:none;align-items:center;justify-content:center;z-index:300}
@@ -221,6 +231,11 @@ canvas{max-height:280px}
   .toast{max-width:100%}
   .btn{min-height:44px}
   td,th{padding:8px 10px}
+}
+
+@media(max-width:900px){
+  .tipcalc-employee-row{grid-template-columns:1fr}
+  .tipcalc-meta{grid-template-columns:1fr}
 }
 
 /* ── Responsive – Mobile (≤ 480 px) ── */
@@ -297,6 +312,9 @@ canvas{max-height:280px}
     </div>
     <div class="nav-item" data-view="dashboard" onclick="navigate(this)" role="button" tabindex="0">
       <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Dashboard
+    </div>
+    <div class="nav-item" onclick="openTipCalcModal()" role="button" tabindex="0" aria-label="Open tip calculator">
+      <span aria-hidden="true">🧮</span>Tip Calculator
     </div>
     <div class="nav-section">Data</div>
     <div class="nav-item" data-view="history" onclick="navigate(this)" role="button" tabindex="0">
@@ -723,6 +741,29 @@ canvas{max-height:280px}
   </div>
 </div>
 
+<!-- Tip Calculator Modal -->
+<div class="modal-overlay" id="tip-calc-modal" role="dialog" aria-modal="true" aria-labelledby="tip-calc-modal-title">
+  <div class="modal tipcalc-modal">
+    <div class="modal-header"><span class="modal-title" id="tip-calc-modal-title">Tip Calculator</span><button class="close-btn" onclick="closeTipCalcModal()" aria-label="Close tip calculator"><span aria-hidden="true">&times;</span></button></div>
+    <div id="tip-calc-error" class="tipcalc-error" role="alert" aria-live="assertive"></div>
+    <div class="form-group" style="margin-bottom:14px">
+      <label for="tip-calc-total">Total Tips ($)</label>
+      <input type="number" id="tip-calc-total" step="0.01" placeholder="0.00">
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+      <div class="card-label" style="margin:0">Employees</div>
+      <button class="btn btn-ghost btn-sm" onclick="addTipCalcEmployeeRow()">Add Employee</button>
+    </div>
+    <div id="tip-calc-rows" class="tipcalc-rows"></div>
+    <div class="divider"></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="runTipCalculation()">Calculate</button>
+      <button class="btn btn-ghost" onclick="closeTipCalcModal()">Close</button>
+    </div>
+    <div id="tip-calc-result"></div>
+  </div>
+</div>
+
 <!-- Shortcut Help -->
 <div class="shortcut-overlay" id="shortcut-overlay" onclick="this.classList.remove('open')" role="dialog" aria-modal="true" aria-labelledby="shortcut-title">
   <div class="shortcut-box" onclick="event.stopPropagation()">
@@ -760,7 +801,13 @@ document.addEventListener('DOMContentLoaded',()=>{
   setupDecimalInputs();
   // Keyboard activation for nav items (role="button")
   document.querySelectorAll('.nav-item[role="button"]').forEach(el=>{
-    el.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();navigate(el)}});
+    el.addEventListener('keydown',e=>{
+      if(e.key==='Enter'||e.key===' '){
+        e.preventDefault();
+        if(el.dataset.view) navigate(el);
+        else el.click();
+      }
+    });
   });
   checkAuth();
 });
@@ -832,7 +879,7 @@ function formatMoneyTick(value){return '$'+formatFixed(value)}
 function setDecimalValue(id,value,digits=2){if(value===null||value===undefined||value===''){sv(id,'');return}sv(id,formatFixed(value,digits))}
 function formatDecimalInput(input,digits=2){if(!input||input.value==='')return;const number=Number(input.value);if(!Number.isFinite(number))return;input.value=number.toFixed(digits)}
 function attachDecimalInput(id,digits=2){const input=$(id);if(!input)return;input.addEventListener('blur',()=>formatDecimalInput(input,digits))}
-function setupDecimalInputs(){['f-rate','f-hours','f-tips','e-rate','e-hours','e-tips','nj-rate','ng-amount','ntc-rate','ntc-flat','ej-rate','ej-ot-threshold','ej-ot-multiplier'].forEach(id=>attachDecimalInput(id,2))}
+function setupDecimalInputs(){['f-rate','f-hours','f-tips','e-rate','e-hours','e-tips','nj-rate','ng-amount','ntc-rate','ntc-flat','ej-rate','ej-ot-threshold','ej-ot-multiplier','tip-calc-total'].forEach(id=>attachDecimalInput(id,2))}
 
 // ── Navigation ──
 const viewKeys=['log','dashboard','history','reports','settings'];
@@ -873,6 +920,157 @@ function updatePreview(){
   $('prev-wages').textContent='$'+wages.toFixed(2);
   $('prev-tips').textContent='$'+totalTips.toFixed(2);
   $('prev-total').textContent='$'+grand.toFixed(2);
+}
+
+// ── Tip Calculator ──
+let tipCalcRowCounter=0;
+
+function truncateToTwoDec(value){
+  const number=Number(value);
+  if(!Number.isFinite(number)) return 0;
+  const truncated=Math.trunc(number*100)/100;
+  return Object.is(truncated,-0)?0:truncated;
+}
+
+function roundWholeDollar(value){
+  const number=Number(value);
+  return Number.isFinite(number)?Math.round(number):0;
+}
+
+function formatTruncatedMoney(value){
+  return '$'+truncateToTwoDec(value).toFixed(2);
+}
+
+function openTipCalcModal(){
+  resetTipCalculator();
+  $('tip-calc-modal').classList.add('open');
+}
+
+function closeTipCalcModal(){
+  $('tip-calc-modal').classList.remove('open');
+}
+
+function resetTipCalculator(){
+  sv('tip-calc-total','');
+  $('tip-calc-rows').innerHTML='';
+  $('tip-calc-result').innerHTML='';
+  setTipCalcError('');
+  addTipCalcEmployeeRow();
+}
+
+function setTipCalcError(message){
+  const banner=$('tip-calc-error');
+  banner.textContent=message||'';
+  banner.classList.toggle('open',Boolean(message));
+}
+
+function addTipCalcEmployeeRow(name='',hours=''){
+  const row=document.createElement('div');
+  const rowId='tip-calc-row-'+(++tipCalcRowCounter);
+  row.className='tipcalc-employee-row';
+  row.id=rowId;
+  row.innerHTML=`
+    <div class="form-group"><label for="${rowId}-name">Name</label><input id="${rowId}-name" data-tipcalc-field="name" placeholder="Employee name"></div>
+    <div class="form-group"><label for="${rowId}-hours">Hours Worked</label><input type="number" id="${rowId}-hours" data-tipcalc-field="hours" step="0.01" placeholder="0.00"></div>
+    <button class="btn btn-danger btn-sm" onclick="removeTipCalcEmployeeRow('${rowId}')" aria-label="Remove employee row">−</button>
+  `;
+  $('tip-calc-rows').appendChild(row);
+  const nameInput=row.querySelector('[data-tipcalc-field="name"]');
+  const hoursInput=row.querySelector('[data-tipcalc-field="hours"]');
+  nameInput.value=name;
+  hoursInput.value=hours;
+  hoursInput.addEventListener('blur',()=>formatDecimalInput(hoursInput,2));
+}
+
+function removeTipCalcEmployeeRow(rowId){
+  const row=$(rowId);
+  if(!row)return;
+  row.remove();
+}
+
+function calculateTipouts(totalTips,employees){
+  if(totalTips<0) throw new Error('Total tips cannot be negative.');
+  if(employees.some(e=>e.hours<0)) throw new Error('Employee hours cannot be negative.');
+  const workedEmployees=employees.filter(e=>e.hours>0);
+  if(!workedEmployees.length) throw new Error('Add at least one employee with hours greater than 0.');
+  const totalHours=workedEmployees.reduce((sum,e)=>sum+e.hours,0);
+  const tipPerHour=truncateToTwoDec(totalTips/totalHours);
+  const calculatedEmployees=workedEmployees.map((employee,index)=>({
+    name:employee.name||`Employee ${index+1}`,
+    hours:employee.hours,
+    tipPerHour,
+    tipout:truncateToTwoDec(employee.hours*tipPerHour)
+  }));
+  const totalTipouts=truncateToTwoDec(calculatedEmployees.reduce((sum,e)=>sum+e.tipout,0));
+  return{
+    employees:calculatedEmployees,
+    tipPerHour,
+    totalHours,
+    totalTipouts,
+    totalTipsRounded:roundWholeDollar(totalTips)
+  };
+}
+
+function renderTipCalculatorResult(result){
+  const rows=result.employees.map(emp=>`
+    <tr>
+      <td>${esc(emp.name)}</td>
+      <td>${formatFixed(emp.hours)} hrs</td>
+      <td>${formatTruncatedMoney(emp.tipPerHour)}/hr</td>
+      <td>${formatTruncatedMoney(emp.tipout)}</td>
+    </tr>
+  `).join('');
+  return `
+    <div class="tipcalc-result">
+      <div class="tipcalc-meta">
+        <div class="tipcalc-meta-card"><div class="label">Total Tips (Rounded)</div><div class="value">$${result.totalTipsRounded}</div></div>
+        <div class="tipcalc-meta-card"><div class="label">Tip Per Hour</div><div class="value">${formatTruncatedMoney(result.tipPerHour)}/hr</div></div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Employee Name</th><th>Hours Worked</th><th>Tip Per Hour</th><th>Tipout</th></tr></thead>
+          <tbody>
+            ${rows}
+            <tr>
+              <td class="td-total">Total</td>
+              <td class="td-total">${formatFixed(result.totalHours)} hrs</td>
+              <td class="td-total">—</td>
+              <td class="td-total">${formatTruncatedMoney(result.totalTipouts)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function runTipCalculation(){
+  const totalTipsValue=gv('tip-calc-total');
+  const totalTips=totalTipsValue===''?0:Number(totalTipsValue);
+  const employees=Array.from($('tip-calc-rows').querySelectorAll('.tipcalc-employee-row')).map(row=>{
+    const name=row.querySelector('[data-tipcalc-field="name"]').value.trim();
+    const hoursRaw=row.querySelector('[data-tipcalc-field="hours"]').value;
+    const hours=hoursRaw===''?0:Number(hoursRaw);
+    return{name,hours};
+  });
+  if(!Number.isFinite(totalTips)){
+    setTipCalcError('Enter a valid total tips amount.');
+    $('tip-calc-result').innerHTML='';
+    return;
+  }
+  if(employees.some(e=>!Number.isFinite(e.hours))){
+    setTipCalcError('Enter valid numeric hours for all employees.');
+    $('tip-calc-result').innerHTML='';
+    return;
+  }
+  try{
+    const result=calculateTipouts(totalTips,employees);
+    setTipCalcError('');
+    $('tip-calc-result').innerHTML=renderTipCalculatorResult(result);
+  }catch(error){
+    setTipCalcError(error.message||'Unable to calculate tipouts.');
+    $('tip-calc-result').innerHTML='';
+  }
 }
 
 // ── Jobs ──
@@ -1617,6 +1815,7 @@ async function openUserModal(id){
 
 function closeUserModal(){$('user-edit-modal').classList.remove('open')}
 $('user-edit-modal').addEventListener('click',function(e){if(e.target===this)closeUserModal()});
+$('tip-calc-modal').addEventListener('click',function(e){if(e.target===this)closeTipCalcModal()});
 
 async function saveUserEdit(){
   const id=parseInt($('eu-id').value,10);
@@ -1804,17 +2003,18 @@ function toast(msg,type=''){const el=document.createElement('div');el.className=
 
 // ── Keyboard Shortcuts ──
 document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&$('tip-calc-modal').classList.contains('open')){closeTipCalcModal();return}
   const tag=document.activeElement.tagName;
   if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT')return;
   if(e.key==='?'){e.preventDefault();$('shortcut-overlay').classList.toggle('open');return}
   if(e.key==='Escape'){$('shortcut-overlay').classList.remove('open');closeEditModal();closeUserModal();return}
   const idx='12345'.indexOf(e.key);
   if(idx>=0&&idx<viewKeys.length){
-    const navItems=document.querySelectorAll('.nav-item');
+    const navItems=document.querySelectorAll('.nav-item[data-view]');
     if(navItems[idx])navigate(navItems[idx]);
   }
   if(e.key==='['||e.key===']'){
-    const navItems=Array.from(document.querySelectorAll('.nav-item'));
+    const navItems=Array.from(document.querySelectorAll('.nav-item[data-view]'));
     if(!navItems.length)return;
     const cur=navItems.findIndex(n=>n.classList.contains('active'));
     const base=cur<0?0:cur;
