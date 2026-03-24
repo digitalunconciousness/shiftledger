@@ -316,7 +316,7 @@ function migrate() {
       if (!hmCols.includes('role')) {
         db.exec("ALTER TABLE household_members ADD COLUMN role TEXT NOT NULL DEFAULT 'member'");
         // Set household creators as admins
-        db.exec("UPDATE household_members SET role = 'admin' WHERE user_id IN (SELECT created_by FROM households WHERE created_by = household_members.user_id AND id = household_members.household_id)");
+        db.exec("UPDATE household_members SET role = 'admin' WHERE EXISTS (SELECT 1 FROM households h WHERE h.id = household_members.household_id AND h.created_by = household_members.user_id)");
       }
     },
   ];
@@ -1146,10 +1146,17 @@ app.post('/api/households/invitations/:id/accept', authMiddleware, householdRate
     if (!inv) return res.status(404).json({ error: 'Invitation not found or already handled' });
     if (inv.invitee_id !== req.user.id) return res.status(403).json({ error: 'Not your invitation' });
 
+    // Check if user is already a member of this household
+    const existingMember = db.prepare('SELECT * FROM household_members WHERE household_id = ? AND user_id = ?').get(inv.household_id, req.user.id);
+    if (existingMember) {
+      db.prepare("UPDATE household_invitations SET status = 'accepted' WHERE id = ?").run(invId);
+      return res.status(409).json({ error: 'You are already a member of this household' });
+    }
+
     const tx = db.transaction(() => {
       db.prepare("UPDATE household_invitations SET status = 'accepted' WHERE id = ?").run(invId);
-      db.prepare("INSERT OR IGNORE INTO household_members (household_id, user_id, role) VALUES (?,?,'member')").run(inv.household_id, req.user.id);
-      // Decline all other pending invitations for this user to this same household
+      db.prepare("INSERT INTO household_members (household_id, user_id, role) VALUES (?,?,'member')").run(inv.household_id, req.user.id);
+      // Clean up any duplicate pending invitations for this user to the same household
       db.prepare("UPDATE household_invitations SET status = 'declined' WHERE invitee_id = ? AND household_id = ? AND id != ? AND status = 'pending'").run(req.user.id, inv.household_id, invId);
     });
     tx();
