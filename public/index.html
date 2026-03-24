@@ -718,8 +718,14 @@ canvas{max-height:280px}
     <div class="modal-header"><span class="modal-title" id="employer-modal-title">Edit Employer</span><button class="close-btn" onclick="closeEmployerModal()" aria-label="Close edit employer dialog"><span aria-hidden="true">&times;</span></button></div>
     <div class="form-grid">
       <input type="hidden" id="ee-id">
-      <div class="form-group"><label>Employer Name</label><input id="ee-name"></div>
-      <div class="form-group"><label>No Tax</label><div style="display:flex;align-items:center;height:42px"><input type="checkbox" id="ee-no-tax"></div></div>
+      <div class="form-group"><label>Employer Name</label><input id="ee-name" placeholder="e.g. Acme Services"></div>
+      <div class="form-group">
+        <label>No Tax</label>
+        <label for="ee-no-tax" style="display:flex;align-items:center;gap:10px;min-height:42px;font-family:var(--mono);font-size:.8rem;color:var(--text-dim);cursor:pointer">
+          <input type="checkbox" id="ee-no-tax">
+          Exclude this employer from tax estimates
+        </label>
+      </div>
     </div>
     <div class="divider"></div>
     <div style="display:flex;gap:10px"><button class="btn btn-primary" onclick="saveEmployerEdit()">Save</button><button class="btn btn-ghost" onclick="closeEmployerModal()">Cancel</button></div>
@@ -1709,6 +1715,7 @@ function openEmployerModal(id,name,noTax){
   sv('ee-name',name||'');
   $('ee-no-tax').checked=!!noTax;
   $('employer-edit-modal').classList.add('open');
+  setTimeout(()=>{const input=$('ee-name');if(input){input.focus();input.select();}},0);
 }
 
 function closeEmployerModal(){
@@ -1720,7 +1727,7 @@ function closeEmployerModal(){
 
 async function saveEmployerEdit(){
   const id=gv('ee-id');
-  const name=gv('ee-name');
+  const name=gv('ee-name').trim();
   const no_tax=$('ee-no-tax').checked;
   if(!name){toast('Employer name is required','error');return}
   const res=await fetch('/api/employers/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,no_tax})});
