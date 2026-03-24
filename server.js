@@ -319,7 +319,15 @@ function migrate() {
         db.exec("UPDATE household_members SET role = 'admin' WHERE EXISTS (SELECT 1 FROM households h WHERE h.id = household_members.household_id AND h.created_by = household_members.user_id)");
       }
     },
-    // v15: employers table + optional employer linkage on jobs
+    // v15: per-job tip calculator save behavior
+    () => {
+      const cols = db.prepare('PRAGMA table_info(jobs)').all().map(c => c.name);
+      if (!cols.includes('tip_calc_round')) {
+        // SQLite stores booleans as INTEGER values (0/1).
+        db.exec('ALTER TABLE jobs ADD COLUMN tip_calc_round INTEGER NOT NULL DEFAULT 0');
+      }
+    },
+    // v16: employers table + optional employer linkage on jobs
     () => {
       db.exec(`
         CREATE TABLE IF NOT EXISTS employers (
