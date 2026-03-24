@@ -624,6 +624,7 @@ const JobSchema = z.object({
   overtime_multiplier: z.number().min(1).optional().default(1.5),
   tip_payment: z.enum(['cash', 'paycheck']).optional().default('cash'),
   employer_id: z.number().int().nullable().optional().default(null),
+  tip_calc_round: z.boolean().optional().default(false),
 });
 
 const EmployerSchema = z.object({
@@ -1452,13 +1453,13 @@ app.get('/api/jobs', authMiddleware, profileRateLimit, (req, res) => {
 
 app.post('/api/jobs', authMiddleware, profileRateLimit, validate(JobSchema), (req, res) => {
   try {
-    const { name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, employer_id } = req.validated;
+    const { name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, employer_id, tip_calc_round } = req.validated;
     const userId = req.user ? req.user.id : null;
     const employerValidation = validateEmployerForJobAssignment(employer_id, userId);
     if (employerValidation) return res.status(employerValidation.status).json({ error: employerValidation.error });
-    const result = db.prepare('INSERT INTO jobs (name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, employer_id, user_id) VALUES (?,?,?,?,?,?,?,?)')
-      .run(name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, employer_id, userId);
-    res.json({ id: result.lastInsertRowid, name, default_rate, color, tip_payment, employer_id, user_id: userId });
+    const result = db.prepare('INSERT INTO jobs (name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, employer_id, tip_calc_round, user_id) VALUES (?,?,?,?,?,?,?,?,?)')
+      .run(name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, employer_id, tip_calc_round ? 1 : 0, userId);
+    res.json({ id: result.lastInsertRowid, name, default_rate, color, tip_payment, employer_id, tip_calc_round: !!tip_calc_round, user_id: userId });
   } catch (e) {
     internalError(res, e);
   }
@@ -1475,11 +1476,11 @@ app.put('/api/jobs/:id', authMiddleware, profileRateLimit, validate(JobSchema), 
     if (job.user_id === null && !req.user.is_admin) {
       return res.status(403).json({ error: 'Only admins can edit global jobs' });
     }
-    const { name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, employer_id } = req.validated;
+    const { name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, employer_id, tip_calc_round } = req.validated;
     const employerValidation = validateEmployerForJobAssignment(employer_id, job.user_id);
     if (employerValidation) return res.status(employerValidation.status).json({ error: employerValidation.error });
-    db.prepare('UPDATE jobs SET name=?, default_rate=?, color=?, overtime_threshold=?, overtime_multiplier=?, tip_payment=?, employer_id=? WHERE id=?')
-      .run(name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, employer_id, req.params.id);
+    db.prepare('UPDATE jobs SET name=?, default_rate=?, color=?, overtime_threshold=?, overtime_multiplier=?, tip_payment=?, employer_id=?, tip_calc_round=? WHERE id=?')
+      .run(name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, employer_id, tip_calc_round ? 1 : 0, req.params.id);
     res.json({ success: true });
   } catch (e) {
     internalError(res, e);
