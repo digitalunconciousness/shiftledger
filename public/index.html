@@ -193,20 +193,6 @@ canvas{max-height:280px}
 .user-info strong{font-size:.9rem}
 .user-info small{font-family:var(--mono);font-size:.7rem;color:var(--text-dim);display:block;margin-top:2px}
 
-/* ── Household ── */
-.hh-member{display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:8px}
-.hh-member .user-dot{width:14px;height:14px;flex-shrink:0}
-.hh-member-info{flex:1}
-.hh-member-info strong{font-size:.88rem}
-.hh-member-info small{font-family:var(--mono);font-size:.7rem;color:var(--text-dim);display:block;margin-top:1px}
-.hh-role-badge{font-family:var(--mono);font-size:.65rem;font-weight:600;padding:2px 8px;border-radius:99px;border:1px solid var(--border);color:var(--text-mute);text-transform:uppercase;letter-spacing:.05em}
-.hh-role-badge.admin{color:var(--amber);border-color:var(--amber);background:var(--amber-glow)}
-.hh-invitation{display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:8px;flex-wrap:wrap}
-.hh-invitation-info{flex:1;font-size:.85rem}
-.hh-invitation-info small{font-family:var(--mono);font-size:.7rem;color:var(--text-dim);display:block;margin-top:2px}
-.hh-invitation-actions{display:flex;gap:6px}
-tr.hh-other-member{opacity:.82}
-
 /* ── Scrollbar ── */
 ::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#333;border-radius:99px}::-webkit-scrollbar-thumb:hover{background:#555}
 
@@ -320,9 +306,6 @@ tr.hh-other-member{opacity:.82}
       <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/></svg>Reports
     </div>
     <div class="nav-section">Account</div>
-    <div class="nav-item" data-view="household" onclick="navigate(this)" role="button" tabindex="0">
-      <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Household
-    </div>
     <div class="nav-item" data-view="settings" onclick="navigate(this)" role="button" tabindex="0">
       <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>Settings
     </div>
@@ -410,7 +393,7 @@ tr.hh-other-member{opacity:.82}
       <div class="page-header" style="display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:12px">
         <div><h1 class="page-title">Shift History</h1><p class="page-sub">All recorded shifts</p></div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <div class="filter-toggle" id="hist-filter-toggle"><button class="filter-btn active" id="hist-btn-all" onclick="setHistFilter(this,'')" data-uid="">All</button><button class="filter-btn" id="hist-btn-mine" onclick="setHistFilter(this,'mine')" data-uid="mine">Mine</button></div>
+          <div class="filter-toggle"><button class="filter-btn" onclick="setHistFilter(this,'')" data-uid="">All</button><button class="filter-btn active" onclick="setHistFilter(this,'mine')" data-uid="mine">Mine</button></div>
           <input type="date" id="hist-from" style="width:140px" onchange="loadHistory()">
           <span style="color:var(--text-mute);font-family:var(--mono);font-size:.8rem">to</span>
           <input type="date" id="hist-to" style="width:140px" onchange="loadHistory()">
@@ -468,15 +451,91 @@ tr.hh-other-member{opacity:.82}
       <!-- My Profile -->
       <div class="card" style="margin-bottom:20px">
         <div class="card-label" style="margin-bottom:12px">My Profile</div>
+        <div id="profile-info" style="display:flex;align-items:center;gap:14px;margin-bottom:16px">
+          <div id="profile-avatar" style="width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:700;font-size:1rem;color:#0a0a0a"></div>
+          <div>
+            <div id="profile-username" style="font-family:var(--mono);font-size:.85rem;color:var(--text-dim)"></div>
+            <div id="profile-role" style="font-family:var(--mono);font-size:.72rem;margin-top:2px"></div>
+            <div id="set-joined-display" style="font-family:var(--mono);font-size:.7rem;color:var(--text-mute);margin-top:2px"></div>
+            <div id="set-household-display" style="font-family:var(--mono);font-size:.7rem;color:var(--text-mute);margin-top:2px"></div>
+          </div>
+        </div>
         <div class="form-grid">
           <div class="form-group"><label>Display Name</label><input id="set-name"></div>
           <div class="form-group"><label>Color</label><input type="color" id="set-color" style="height:42px;padding:4px"></div>
-          <div class="form-group"><label>New Password</label><input type="password" id="set-pass" placeholder="Leave blank to keep current"></div>
           <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="saveProfile()">Save Profile</button></div>
         </div>
       </div>
-      <!-- Admin: Manage Users -->
+      <!-- Change Password -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-label" style="margin-bottom:12px">Change Password</div>
+        <div class="form-grid">
+          <div class="form-group"><label>Current Password</label><input type="password" id="pw-current" autocomplete="current-password"></div>
+          <div class="form-group"><label>New Password</label><input type="password" id="pw-new" placeholder="8+ chars, letter + number/symbol" autocomplete="new-password"></div>
+          <div class="form-group"><label>Confirm New Password</label><input type="password" id="pw-confirm" autocomplete="new-password"></div>
+          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="changePassword()">Change Password</button></div>
+        </div>
+      </div>
+      <!-- Manage Jobs (all users) -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-label" style="margin-bottom:12px">My Jobs</div>
+        <div id="jobs-list"></div>
+        <div class="divider"></div>
+        <div class="form-grid">
+          <div class="form-group"><label>Job Name</label><input id="nj-name"></div>
+          <div class="form-group"><label>Default Rate</label><input type="number" id="nj-rate" step="0.25" min="0" placeholder="0.00"></div>
+          <div class="form-group"><label>Color</label><input type="color" id="nj-color" value="#f5a623" style="height:42px;padding:4px"></div>
+          <div class="form-group"><label>Tips Paid As</label><select id="nj-tip-payment" style="height:42px"><option value="cash">Cash (Nightly)</option><option value="paycheck">On Paycheck</option></select></div>
+          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addJob()">Add Job</button></div>
+        </div>
+      </div>
+      <!-- Goals (all users) -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-label" style="margin-bottom:12px">My Goals</div>
+        <div id="goals-list"></div>
+        <div class="divider"></div>
+        <div class="form-grid">
+          <div class="form-group"><label>Period</label><select id="ng-period"><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></div>
+          <div class="form-group"><label>Target ($)</label><input type="number" id="ng-amount" step="1" min="0" placeholder="500"></div>
+          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addGoal()">Add Goal</button></div>
+        </div>
+      </div>
+      <!-- Tax & Deduction Rates (all users) -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-label" style="margin-bottom:4px">Tax & Deduction Rates</div>
+        <p style="font-size:.75rem;color:var(--text-mute);margin-bottom:12px;font-family:var(--mono)">Customize your own tax rates. Global defaults are shown; save your own to override.</p>
+        <div id="tax-config-list"></div>
+        <div class="divider"></div>
+        <div class="card-label" style="margin-bottom:8px">Add Custom Deduction</div>
+        <div class="form-grid">
+          <div class="form-group"><label>Key</label><input id="ntc-key" placeholder="e.g. health_ins"></div>
+          <div class="form-group"><label>Label</label><input id="ntc-label" placeholder="e.g. Health Insurance"></div>
+          <div class="form-group"><label>Rate (%)</label><input type="number" id="ntc-rate" step="0.1" min="0" max="100" placeholder="0"></div>
+          <div class="form-group"><label>Flat ($/period)</label><input type="number" id="ntc-flat" step="1" min="0" placeholder="0"></div>
+          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addTaxConfig()">Add</button></div>
+        </div>
+      </div>
+      <!-- Household (all users) -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-label" style="margin-bottom:12px">Household</div>
+        <p style="font-size:.75rem;color:var(--text-mute);margin-bottom:12px;font-family:var(--mono)">Join or create a household to share shift data with family members (read-only access to each other's data).</p>
+        <!-- Pending invitations for current user -->
+        <div id="household-my-invitations" style="display:none;margin-bottom:14px"></div>
+        <div id="household-list"></div>
+        <div class="divider"></div>
+        <div class="form-grid">
+          <div class="form-group"><label>Create New Household</label><input id="hh-name" placeholder="e.g. Smith Family"></div>
+          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="createHousehold()">Create</button></div>
+        </div>
+        <div class="divider"></div>
+        <div class="form-grid">
+          <div class="form-group"><label>Join via Invite Code</label><input id="hh-invite" placeholder="Enter invite code"></div>
+          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="joinHousehold()">Join Household</button></div>
+        </div>
+      </div>
+      <!-- Admin Section -->
       <div id="admin-section" style="display:none">
+        <!-- Manage Users -->
         <div class="card" style="margin-bottom:20px">
           <div class="card-label" style="margin-bottom:12px">Manage Users (Admin)</div>
           <div id="users-list"></div>
@@ -489,33 +548,8 @@ tr.hh-other-member{opacity:.82}
             <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addUser()">Add User</button></div>
           </div>
         </div>
-        <!-- Manage Jobs -->
         <div class="card" style="margin-bottom:20px">
-          <div class="card-label" style="margin-bottom:12px">Manage Jobs</div>
-          <div id="jobs-list"></div>
-          <div class="divider"></div>
-          <div class="form-grid">
-            <div class="form-group"><label>Job Name</label><input id="nj-name"></div>
-            <div class="form-group"><label>Default Rate</label><input type="number" id="nj-rate" step="0.25" min="0" placeholder="0.00"></div>
-            <div class="form-group"><label>Color</label><input type="color" id="nj-color" value="#f5a623" style="height:42px;padding:4px"></div>
-            <div class="form-group"><label>Tips Paid As</label><select id="nj-tip-payment" style="height:42px"><option value="cash">Cash (Nightly)</option><option value="paycheck">On Paycheck</option></select></div>
-            <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addJob()">Add Job</button></div>
-          </div>
-        </div>
-        <!-- Goals -->
-        <div class="card">
-          <div class="card-label" style="margin-bottom:12px">Goals</div>
-          <div id="goals-list"></div>
-          <div class="divider"></div>
-          <div class="form-grid">
-            <div class="form-group"><label>Period</label><select id="ng-period"><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></div>
-            <div class="form-group"><label>Target ($)</label><input type="number" id="ng-amount" step="1" min="0" placeholder="500"></div>
-            <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addGoal()">Add Goal</button></div>
-          </div>
-        </div>
-        <!-- App Settings -->
-        <div class="card" style="margin-bottom:20px">
-          <div class="card-label" style="margin-bottom:12px">App Settings</div>
+          <div class="card-label" style="margin-bottom:12px">App Settings (Admin)</div>
           <div class="form-grid">
             <div class="form-group">
               <label>Pay Week Starts On</label>
@@ -577,85 +611,56 @@ tr.hh-other-member{opacity:.82}
           </div>
           <div style="font-size:.68rem;color:var(--text-mute);font-family:var(--mono);margin-top:8px" id="tp-meta-line"></div>
         </div>
-        <!-- Tax & Deduction Rates -->
+        <!-- Paycheck Entry (Admin) -->
         <div class="card" style="margin-bottom:20px">
-          <div class="card-label" style="margin-bottom:12px">Tax & Deduction Rates</div>
-          <p style="font-size:.75rem;color:var(--text-mute);margin-bottom:12px;font-family:var(--mono)">These estimates are for budgeting only — not tax advice.</p>
-          <div id="tax-config-list"></div>
-          <div class="divider"></div>
-          <div class="card-label" style="margin-bottom:8px">Add Custom Deduction</div>
+          <div class="card-label" style="margin-bottom:4px">Paycheck Entry</div>
+          <p style="font-size:.75rem;color:var(--text-mute);margin-bottom:12px;font-family:var(--mono)">Enter real paycheck data to calculate actual withholding rates and optionally apply them to your tax config.</p>
           <div class="form-grid">
-            <div class="form-group"><label>Key</label><input id="ntc-key" placeholder="e.g. health_ins"></div>
-            <div class="form-group"><label>Label</label><input id="ntc-label" placeholder="e.g. Health Insurance"></div>
-            <div class="form-group"><label>Rate (%)</label><input type="number" id="ntc-rate" step="0.1" min="0" max="100" placeholder="0"></div>
-            <div class="form-group"><label>Flat ($/period)</label><input type="number" id="ntc-flat" step="1" min="0" placeholder="0"></div>
-            <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addTaxConfig()">Add</button></div>
+            <div class="form-group"><label>Pay Date</label><input type="date" id="pc-date"></div>
+            <div class="form-group"><label>Gross Pay ($)</label><input type="number" id="pc-gross" step="0.01" min="0" placeholder="0.00" oninput="updatePaycheckRates()"></div>
+            <div class="form-group"><label>Federal Withholding ($)</label><input type="number" id="pc-federal" step="0.01" min="0" placeholder="0.00" oninput="updatePaycheckRates()"></div>
+            <div class="form-group"><label>State Withholding ($)</label><input type="number" id="pc-state" step="0.01" min="0" placeholder="0.00" oninput="updatePaycheckRates()"></div>
+            <div class="form-group"><label>Social Security ($)</label><input type="number" id="pc-ss" step="0.01" min="0" placeholder="0.00" oninput="updatePaycheckRates()"></div>
+            <div class="form-group"><label>Medicare ($)</label><input type="number" id="pc-medicare" step="0.01" min="0" placeholder="0.00" oninput="updatePaycheckRates()"></div>
+            <div class="form-group"><label>Net Pay ($)</label><input type="number" id="pc-net" step="0.01" min="0" placeholder="0.00"></div>
+            <div class="form-group full"><label>Notes</label><input id="pc-notes" placeholder="e.g. Week of Mar 17"></div>
           </div>
+          <div id="pc-rates-preview" style="display:none;margin:12px 0;padding:12px;background:var(--surface);border-radius:8px;font-family:var(--mono);font-size:.8rem">
+            <div style="font-size:.72rem;color:var(--text-mute);margin-bottom:8px">Effective Rates (calculated from gross pay)</div>
+            <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px 20px" id="pc-rates-grid"></div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
+            <button class="btn btn-primary btn-sm" onclick="savePaycheck()">Save Paycheck</button>
+            <button class="btn btn-ghost btn-sm" id="pc-apply-btn" onclick="applyPaycheckRates()" style="display:none">Apply Rates to Tax Config</button>
+          </div>
+          <div class="divider" style="margin-top:16px"></div>
+          <div class="card-label" style="margin-bottom:8px">Paycheck History</div>
+          <div id="pc-history-list"><p style="font-size:.8rem;color:var(--text-mute);font-family:var(--mono)">No paycheck entries yet.</p></div>
         </div>
-      </div>
-    </div>
-
-    <!-- ── HOUSEHOLD ── -->
-    <div class="view" id="view-household">
-      <div class="page-header"><h1 class="page-title">Household</h1><p class="page-sub">Collaborate and share shift data with others</p></div>
-
-      <!-- Pending Invitations (shown for all users) -->
-      <div id="household-invitations-section" style="display:none;margin-bottom:20px">
-        <div class="card">
-          <div class="card-label" style="margin-bottom:12px">Pending Invitations</div>
-          <div id="household-invitations-list"></div>
-        </div>
-      </div>
-
-      <!-- Not in a household -->
-      <div id="household-create-section" style="display:none">
+        <!-- Audit Log -->
         <div class="card" style="margin-bottom:20px">
-          <div class="card-label" style="margin-bottom:12px">Create a Household</div>
-          <p style="font-family:var(--mono);font-size:.78rem;color:var(--text-dim);margin-bottom:14px">Start a household so others can join and view your shift data.</p>
-          <div class="form-grid">
-            <div class="form-group"><label>Household Name</label><input id="hh-name" placeholder="e.g. Smith Family"></div>
-            <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="createHousehold()">Create Household</button></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- In a household -->
-      <div id="household-info-section" style="display:none">
-        <!-- Household header -->
-        <div class="card" style="margin-bottom:20px">
-          <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px">
-            <div>
-              <div class="card-label">Household</div>
-              <div id="household-name-display" style="font-size:1.3rem;font-weight:700;margin-top:4px"></div>
-              <div id="household-role-badge" style="margin-top:6px"></div>
-            </div>
-            <button class="btn btn-danger btn-sm" onclick="leaveHousehold()">Leave Household</button>
-          </div>
-        </div>
-
-        <!-- Members list -->
-        <div class="card" style="margin-bottom:20px">
-          <div class="card-label" style="margin-bottom:12px">Members</div>
-          <div id="household-members-list"></div>
-        </div>
-
-        <!-- Invite member (admin only) -->
-        <div id="household-invite-section" style="display:none">
-          <div class="card" style="margin-bottom:20px">
-            <div class="card-label" style="margin-bottom:12px">Invite a Member</div>
-            <p style="font-family:var(--mono);font-size:.78rem;color:var(--text-dim);margin-bottom:14px">Enter the username of the person you want to invite.</p>
-            <div class="form-grid">
-              <div class="form-group"><label>Username</label><input id="hh-invite-user" placeholder="username"></div>
-              <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="inviteToHousehold()">Send Invite</button></div>
-            </div>
-            <!-- Pending outgoing invitations -->
-            <div id="household-pending-outgoing" style="margin-top:14px"></div>
-          </div>
+          <div class="card-label" style="margin-bottom:12px">Admin Audit Log</div>
+          <div id="audit-log-list" style="font-family:var(--mono);font-size:.78rem;color:var(--text-dim)">Loading…</div>
         </div>
       </div>
     </div>
 
   </main>
+</div>
+
+<!-- Reset Password Modal -->
+<div class="modal-overlay" id="reset-pw-modal" role="dialog" aria-modal="true" aria-labelledby="reset-pw-modal-title">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title" id="reset-pw-modal-title">Reset Password</span><button class="close-btn" onclick="closeResetPwModal()" aria-label="Close reset password dialog"><span aria-hidden="true">×</span></button></div>
+    <input type="hidden" id="reset-pw-user-id">
+    <p id="reset-pw-user-label" style="font-family:var(--mono);font-size:.85rem;color:var(--text-dim);margin-bottom:16px"></p>
+    <div class="form-grid">
+      <div class="form-group"><label>New Password</label><input type="password" id="reset-pw-new" placeholder="8+ chars, letter + number/symbol" autocomplete="new-password"></div>
+      <div class="form-group"><label>Confirm Password</label><input type="password" id="reset-pw-confirm" autocomplete="new-password"></div>
+    </div>
+    <div class="divider"></div>
+    <div style="display:flex;gap:10px"><button class="btn btn-primary" onclick="submitAdminResetPw()">Reset Password</button><button class="btn btn-ghost" onclick="closeResetPwModal()">Cancel</button></div>
+  </div>
 </div>
 
 <!-- Edit Modal -->
@@ -695,6 +700,29 @@ tr.hh-other-member{opacity:.82}
   </div>
 </div>
 
+<!-- Admin: Edit User Profile Modal -->
+<div class="modal-overlay" id="user-edit-modal" role="dialog" aria-modal="true" aria-labelledby="user-modal-title">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title" id="user-modal-title">Edit User Profile</span><button class="close-btn" onclick="closeUserModal()" aria-label="Close edit user dialog"><span aria-hidden="true">&times;</span></button></div>
+    <div id="eu-profile-info" style="display:flex;align-items:center;gap:14px;margin-bottom:16px">
+      <div id="eu-avatar" style="width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:700;font-size:1rem;color:#0a0a0a"></div>
+      <div>
+        <div id="eu-username-display" style="font-family:var(--mono);font-size:.85rem;color:var(--text-dim)"></div>
+        <div id="eu-role-display" style="font-family:var(--mono);font-size:.72rem;margin-top:2px"></div>
+        <div id="eu-joined-display" style="font-family:var(--mono);font-size:.7rem;color:var(--text-mute);margin-top:2px"></div>
+        <div id="eu-household-display" style="font-family:var(--mono);font-size:.7rem;color:var(--text-mute);margin-top:2px"></div>
+      </div>
+    </div>
+    <input type="hidden" id="eu-id">
+    <div class="form-grid">
+      <div class="form-group"><label>Display Name</label><input id="eu-name"></div>
+      <div class="form-group"><label>Color</label><input type="color" id="eu-color" style="height:42px;padding:4px" oninput="document.getElementById('eu-avatar').style.background=this.value"></div>
+    </div>
+    <div class="divider"></div>
+    <div style="display:flex;gap:10px"><button class="btn btn-primary" onclick="saveUserEdit()">Save</button><button class="btn btn-ghost" onclick="closeUserModal()">Cancel</button></div>
+  </div>
+</div>
+
 <!-- Shortcut Help -->
 <div class="shortcut-overlay" id="shortcut-overlay" onclick="this.classList.remove('open')" role="dialog" aria-modal="true" aria-labelledby="shortcut-title">
   <div class="shortcut-box" onclick="event.stopPropagation()">
@@ -703,8 +731,7 @@ tr.hh-other-member{opacity:.82}
     <div class="shortcut-row"><span>Dashboard</span><span class="shortcut-key">2</span></div>
     <div class="shortcut-row"><span>History</span><span class="shortcut-key">3</span></div>
     <div class="shortcut-row"><span>Reports</span><span class="shortcut-key">4</span></div>
-    <div class="shortcut-row"><span>Household</span><span class="shortcut-key">5</span></div>
-    <div class="shortcut-row"><span>Settings</span><span class="shortcut-key">6</span></div>
+    <div class="shortcut-row"><span>Settings</span><span class="shortcut-key">5</span></div>
     <div class="shortcut-row"><span>Previous View</span><span class="shortcut-key">&lsqb;</span></div>
     <div class="shortcut-row"><span>Next View</span><span class="shortcut-key">&rsqb;</span></div>
     <div class="shortcut-row"><span>Save Shift</span><span class="shortcut-key">Ctrl+Enter</span></div>
@@ -720,8 +747,8 @@ tr.hh-other-member{opacity:.82}
 let currentUser = null;
 let trendChart=null,breakdownChart=null,tipRatioChart=null,effRateChart=null;
 let currentPeriod='month';
-let dashFilterUser='';
-let histFilterUser='';
+let dashFilterUser='mine';
+let histFilterUser='mine';
 let jobsCache=[];
 let templatesCache=[];
 
@@ -808,7 +835,7 @@ function attachDecimalInput(id,digits=2){const input=$(id);if(!input)return;inpu
 function setupDecimalInputs(){['f-rate','f-hours','f-tips','e-rate','e-hours','e-tips','nj-rate','ng-amount','ntc-rate','ntc-flat','ej-rate','ej-ot-threshold','ej-ot-multiplier'].forEach(id=>attachDecimalInput(id,2))}
 
 // ── Navigation ──
-const viewKeys=['log','dashboard','history','reports','household','settings'];
+const viewKeys=['log','dashboard','history','reports','settings'];
 function navigate(el){
   document.querySelectorAll('.nav-item').forEach(n=>{n.classList.remove('active');n.removeAttribute('aria-current')});
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
@@ -819,7 +846,6 @@ function navigate(el){
   if(view==='dashboard')loadDashboard();
   if(view==='history')loadHistory();
   if(view==='settings')loadSettings();
-  if(view==='household')loadHousehold();
   // Close mobile sidebar
   $('sidebar').classList.remove('open');
   $('sidebar-overlay').classList.remove('open');
@@ -911,13 +937,16 @@ function clearForm(){
 function setDashFilter(el,uid){
   document.querySelectorAll('#dash-filter .filter-btn').forEach(b=>b.classList.remove('active'));
   el.classList.add('active');
-  dashFilterUser=uid===''?'all':'';
+  dashFilterUser=uid===''?'all':'mine';
   loadDashboard();
 }
 
 async function loadDashboard(){
-  const qs=dashFilterUser==='all'?'?user_id=all':'';
-  const qsa=dashFilterUser==='all'?'&user_id=all':'';
+  const myId=currentUser?currentUser.id:'';
+  const isMine=dashFilterUser==='mine';
+  const isAll=dashFilterUser==='all';
+  const qs=isMine&&myId?`?user_id=${myId}`:isAll&&currentUser&&currentUser.is_admin?'?user_id=all':'';
+  const qsa=isMine&&myId?`&user_id=${myId}`:isAll&&currentUser&&currentUser.is_admin?'&user_id=all':'';
   const[sumRes,trendRes,dowRes,tipRes,otRes,taxRes,goalsRes,pchkRes,histRes]=await Promise.all([
     fetch('/api/summary'+qs),fetch('/api/trends?period='+currentPeriod+qsa),
     fetch('/api/analytics/effective-rate'+qs),fetch('/api/analytics/tip-ratio'+qs),
@@ -1089,8 +1118,7 @@ function renderEffRateChart(data){
 function setHistFilter(el,uid){
   el.parentElement.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
   el.classList.add('active');
-  // Admin 'All' button (uid='') shows all users; otherwise use uid directly
-  histFilterUser=(uid===''&&currentUser&&currentUser.is_admin)?'all':uid;
+  histFilterUser=uid===''?'all':'mine';
   loadHistory();
 }
 
@@ -1098,9 +1126,9 @@ async function loadHistory(){
   const from=gv('hist-from'),to=gv('hist-to');
   let url='/api/shifts?';
   if(from&&to)url+=`from=${from}&to=${to}&`;else if(from)url+=`from=${from}&`;
-  if(histFilterUser==='all')url+=`user_id=all&`;
-  else if(histFilterUser==='mine')url+=`user_id=mine&`;
-  // else: no user_id → household-aware default (household members or own data)
+  const myId=currentUser?currentUser.id:'';
+  if(histFilterUser==='mine'&&myId)url+=`user_id=${myId}&`;
+  else if(histFilterUser==='all'&&currentUser&&currentUser.is_admin)url+=`user_id=all&`;
   const shifts=await fetch(url).then(r=>r.json());
   const tbody=$('history-body');
   if(!shifts.length){tbody.innerHTML='<tr><td colspan="11" class="empty">No shifts found.</td></tr>';$('history-totals').style.display='none';return}
@@ -1108,10 +1136,9 @@ async function loadHistory(){
   tbody.innerHTML=shifts.map(s=>{
     totH+=s.hours_worked;totW+=s.wage_total;totT+=s.total_tips;totG+=s.grand_total;
     const tph=s.hours_worked>0?(s.total_tips/s.hours_worked).toFixed(2):'0.00';
-    const isOwnShift=currentUser&&s.user_id===currentUser.id;
-    const canEdit=currentUser&&(isOwnShift||currentUser.is_admin);
+    const canEdit=currentUser&&(s.user_id===currentUser.id||currentUser.is_admin);
     const dot=s.user_color?`<span class="user-dot" style="background:${s.user_color}" title="${esc(s.user_name||'')}"></span>`:'';
-    return `<tr${!isOwnShift&&s.user_name?' class="hh-other-member"':''}>
+    return `<tr>
       <td>${dot}</td><td>${s.date}</td><td>${esc(s.job_name||'—')}</td>
       <td>${s.hours_worked.toFixed(2)}</td><td>$${s.hourly_rate.toFixed(2)}</td>
       <td>$${s.wage_total.toFixed(2)}</td><td class="td-tips">$${tph}</td><td class="td-tips">$${s.total_tips.toFixed(2)}</td>
@@ -1186,16 +1213,36 @@ async function loadAppSettings(){
 }
 
 async function loadSettings(){
-  $('set-name').value=currentUser.display_name;$('set-color').value=currentUser.color;
+  // Profile section (all users) — fetch fresh data from API for join date + households
+  try {
+    const profile=await fetch('/api/profile').then(r=>r.json());
+    $('set-name').value=profile.display_name;
+    $('set-color').value=profile.color;
+    const roleEl=$('profile-role');
+    if(roleEl) roleEl.textContent=profile.is_admin?'Administrator':'User';
+    const avatarEl=$('profile-avatar');
+    if(avatarEl){avatarEl.style.background=profile.color;avatarEl.textContent=((profile.display_name||'').trim()||'?')[0].toUpperCase();}
+    const usernameEl=$('profile-username');
+    if(usernameEl) usernameEl.textContent='@'+profile.username;
+    const joinedEl=$('set-joined-display');
+    if(joinedEl) joinedEl.textContent='Joined '+new Date(profile.created_at).toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
+    const hhEl=$('set-household-display');
+    if(hhEl) hhEl.textContent=profile.households&&profile.households.length>0?'Household: '+profile.households.map(h=>h.name).join(', '):'No household';
+  } catch(e) {
+    $('set-name').value=currentUser.display_name;$('set-color').value=currentUser.color;
+  }
+
+  // Load jobs, goals, tax config for all users
+  loadJobsList();loadGoalsList();loadTaxConfig();loadHouseholds();
   if(currentUser.is_admin){
-    loadUsersList();loadJobsList();loadGoalsList();
+    loadUsersList();loadAuditLog();
     const s=await loadAppSettings();
     $('set-week-start').value=s.pay_week_start_day||'1';
     $('set-pay-period').value=s.pay_period_type||'weekly';
     $('set-anchor').value=s.pay_period_anchor||'';
     toggleAnchor();
-    loadTaxConfig();
     loadTaxProfiles();
+    loadPaycheckHistory();
   }
 }
 
@@ -1338,6 +1385,103 @@ async function applyTaxProfile(){
   $('tp-preview').style.display='none';
 }
 
+// ── Paycheck Entry ────────────────────────────────────────────────────────────
+
+let _lastSavedPaycheckId=null;
+
+function updatePaycheckRates(){
+  const gross=parseFloat($('pc-gross').value)||0;
+  const federal=parseFloat($('pc-federal').value)||0;
+  const state=parseFloat($('pc-state').value)||0;
+  const ss=parseFloat($('pc-ss').value)||0;
+  const medicare=parseFloat($('pc-medicare').value)||0;
+  const preview=$('pc-rates-preview');
+  const grid=$('pc-rates-grid');
+  const applyBtn=$('pc-apply-btn');
+  if(gross<=0){preview.style.display='none';if(applyBtn)applyBtn.style.display='none';return}
+  const items=[
+    {label:'Federal',amount:federal},
+    {label:'State',amount:state},
+    {label:'Social Security',amount:ss},
+    {label:'Medicare',amount:medicare},
+  ];
+  grid.innerHTML=items.map(i=>{
+    const rate=gross>0?(i.amount/gross*100).toFixed(2):'0.00';
+    return `<div><span style="color:var(--text-mute)">${i.label}</span> <strong>${rate}%</strong> <span style="color:var(--text-mute);font-size:.72rem">($${i.amount.toFixed(2)})</span></div>`;
+  }).join('');
+  preview.style.display='block';
+  if(applyBtn&&_lastSavedPaycheckId&&currentUser&&currentUser.is_admin)applyBtn.style.display='';
+}
+
+async function savePaycheck(){
+  const pay_date=gv('pc-date');
+  const gross_pay=parseFloat($('pc-gross').value);
+  const federal_withholding=parseFloat($('pc-federal').value)||0;
+  const state_withholding=parseFloat($('pc-state').value)||0;
+  const social_security=parseFloat($('pc-ss').value)||0;
+  const medicare=parseFloat($('pc-medicare').value)||0;
+  const net_pay=parseFloat($('pc-net').value)||0;
+  const notes=gv('pc-notes');
+  if(!pay_date){toast('Enter a pay date','error');return}
+  if(isNaN(gross_pay)||gross_pay<=0){toast('Enter a valid gross pay amount greater than 0','error');return}
+  const body={pay_date,gross_pay,federal_withholding,state_withholding,social_security,medicare,net_pay,notes};
+  const res=await fetch('/api/paychecks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!res.ok){const d=await res.json();toast(d.error||'Failed to save paycheck','error');return}
+  const data=await res.json();
+  _lastSavedPaycheckId=data.id;
+  toast('Paycheck saved','success');
+  const applyBtn=$('pc-apply-btn');
+  if(applyBtn&&currentUser&&currentUser.is_admin)applyBtn.style.display='';
+  loadPaycheckHistory();
+}
+
+async function applyPaycheckRates(){
+  if(!_lastSavedPaycheckId){toast('Save a paycheck first','error');return}
+  if(!confirm('Apply the effective rates from this paycheck to your Federal, State, Social Security, and Medicare tax config? This will overwrite the current rates.'))return;
+  const res=await fetch('/api/paychecks/'+_lastSavedPaycheckId+'/apply-rates',{method:'POST'});
+  if(!res.ok){const d=await res.json();toast(d.error||'Failed to apply rates','error');return}
+  toast('Rates applied to tax config','success');
+  loadTaxConfig();
+}
+
+async function loadPaycheckHistory(){
+  const paychecks=await fetch('/api/paychecks').then(r=>r.json());
+  const el=$('pc-history-list');
+  if(!paychecks.length){el.innerHTML='<p style="font-size:.8rem;color:var(--text-mute);font-family:var(--mono)">No paycheck entries yet.</p>';return}
+  el.innerHTML=paychecks.map(p=>{
+    const gross=p.gross_pay||0;
+    const total_withholding=p.federal_withholding+p.state_withholding+p.social_security+p.medicare;
+    const effRate=gross>0?(total_withholding/gross*100).toFixed(1):'0.0';
+    return `<div class="user-card" style="margin-bottom:8px;flex-wrap:wrap;gap:6px">
+      <div class="user-info" style="flex:1;min-width:0">
+        <strong>${esc(p.pay_date)}</strong>
+        <small style="font-family:var(--mono)">Gross $${gross.toFixed(2)} · Net $${p.net_pay.toFixed(2)} · Eff. rate ${effRate}%${p.notes?' · '+esc(p.notes):''}</small>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
+        ${currentUser&&currentUser.is_admin?`<button class="btn btn-ghost btn-sm" onclick="applyHistoryPaycheckRates(${p.id})">Apply Rates</button>`:''}
+        <button class="btn btn-danger btn-sm" onclick="deletePaycheck(${p.id})">×</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function applyHistoryPaycheckRates(id){
+  if(!confirm('Apply the effective rates from this paycheck to your Federal, State, Social Security, and Medicare tax config? This will overwrite the current rates.'))return;
+  const res=await fetch('/api/paychecks/'+id+'/apply-rates',{method:'POST'});
+  if(!res.ok){const d=await res.json();toast(d.error||'Failed to apply rates','error');return}
+  toast('Rates applied to tax config','success');
+  loadTaxConfig();
+}
+
+async function deletePaycheck(id){
+  if(!confirm('Delete this paycheck entry?'))return;
+  const res=await fetch('/api/paychecks/'+id,{method:'DELETE'});
+  if(!res.ok){const d=await res.json();toast(d.error||'Failed to delete','error');return}
+  toast('Paycheck deleted','success');
+  if(_lastSavedPaycheckId===id){_lastSavedPaycheckId=null;const btn=$('pc-apply-btn');if(btn)btn.style.display='none';}
+  loadPaycheckHistory();
+}
+
 
 function renderPaycheckCard(p){
   if(!p||!p.period){$('paycheck-card').innerHTML='';return}
@@ -1362,13 +1506,35 @@ function renderPaycheckCard(p){
     </div>`;
 }
 
+function validatePasswordFields(pw,confirm){
+  if(!pw||!confirm){toast('Fill all password fields','error');return false}
+  if(pw!==confirm){toast('Passwords do not match','error');return false}
+  if(pw.length<8){toast('Password must be at least 8 characters','error');return false}
+  return true;
+}
+
 async function saveProfile(){
   const body={display_name:gv('set-name'),color:gv('set-color')};
-  const pass=gv('set-pass');if(pass)body.password=pass;
-  await fetch('/api/users/'+currentUser.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  currentUser.display_name=body.display_name;currentUser.color=body.color;
+  const res=await fetch('/api/users/'+currentUser.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const data=await res.json();
+  if(!res.ok){toast(data.error||'Failed to save profile','error');return}
+  currentUser.display_name=data.user.display_name;currentUser.color=data.user.color;
+  const avatarEl=$('profile-avatar');
+  if(avatarEl){avatarEl.style.background=currentUser.color;avatarEl.textContent=((currentUser.display_name||'').trim()||'?')[0].toUpperCase();}
   $('topbar-user').innerHTML=`<span class="user-dot" style="background:${currentUser.color}"></span>${esc(currentUser.display_name)}`;
-  sv('set-pass','');toast('Profile saved','success');
+  toast('Profile saved','success');
+}
+
+async function changePassword(){
+  const current=gv('pw-current'),np=gv('pw-new'),confirm=gv('pw-confirm');
+  if(!current){toast('Enter your current password','error');return}
+  if(!validatePasswordFields(np,confirm))return;
+  const res=await fetch('/api/auth/change-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({current_password:current,new_password:np})});
+  const data=await res.json();
+  if(!res.ok){toast(data.error||'Password change failed','error');return}
+  sv('pw-current','');sv('pw-new','');sv('pw-confirm','');
+  toast('Password changed — please log in again','success');
+  setTimeout(()=>window.location.reload(),1500);
 }
 
 async function loadUsersList(){
@@ -1377,9 +1543,41 @@ async function loadUsersList(){
     <div class="user-card">
       <span class="user-dot" style="background:${u.color}"></span>
       <div class="user-info"><strong>${esc(u.display_name)}</strong><small>@${esc(u.username)} ${u.is_admin?'· Admin':''}</small></div>
-      ${u.id!==currentUser.id?`<button class="btn btn-ghost btn-sm" onclick="toggleAdmin(${u.id},${u.is_admin?0:1})">${u.is_admin?'Demote':'Promote'}</button><button class="btn btn-danger" onclick="deleteUser(${u.id})">Delete</button>`:'<span style="font-family:var(--mono);font-size:.7rem;color:var(--text-mute)">You</span>'}
+      ${u.id!==currentUser.id?`<div style="display:flex;gap:6px"><button class="btn btn-ghost btn-sm" onclick="openUserModal(${u.id})">Edit</button><button class="btn btn-ghost btn-sm" onclick="toggleAdmin(${u.id},${u.is_admin?0:1})">${u.is_admin?'Demote':'Promote'}</button><button class="btn btn-ghost btn-sm" onclick="openResetPwModal(${u.id},'${esc(u.username)}')">Reset PW</button><button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id})">Delete</button></div>`:'<span style="font-family:var(--mono);font-size:.7rem;color:var(--text-mute)">You</span>'}
     </div>
   `).join('');
+}
+
+function openResetPwModal(id,username){
+  $('reset-pw-user-id').value=id;
+  $('reset-pw-user-label').textContent='Resetting password for: @'+username;
+  $('reset-pw-new').value='';$('reset-pw-confirm').value='';
+  $('reset-pw-modal').classList.add('open');
+}
+
+function closeResetPwModal(){
+  $('reset-pw-modal').classList.remove('open');
+}
+
+async function submitAdminResetPw(){
+  const id=parseInt($('reset-pw-user-id').value,10);
+  const np=gv('reset-pw-new'),confirm=gv('reset-pw-confirm');
+  if(!validatePasswordFields(np,confirm))return;
+  const res=await fetch('/api/users/'+id+'/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({new_password:np})});
+  const data=await res.json();
+  if(!res.ok){toast(data.error||'Reset failed','error');return}
+  closeResetPwModal();
+  toast(data.message||'Password reset successfully','success');
+  loadAuditLog();
+}
+
+async function loadAuditLog(){
+  const el=$('audit-log-list');if(!el)return;
+  try{
+    const rows=await fetch('/api/audit-log').then(r=>r.json());
+    if(!rows.length){el.textContent='No admin actions recorded yet.';return}
+    el.innerHTML=rows.map(r=>`<div style="padding:6px 0;border-bottom:1px solid var(--border)"><span style="color:var(--amber)">${esc(r.actor_username)}</span> → <span style="color:var(--green)">${esc(r.target_username)}</span>: ${esc(r.detail)} <span style="color:var(--text-mute);float:right">${r.created_at.replace('T',' ').substring(0,16)}</span></div>`).join('');
+  }catch(e){el.textContent='Could not load audit log.';}
 }
 
 async function addUser(){
@@ -1392,7 +1590,8 @@ async function addUser(){
 }
 
 async function toggleAdmin(id,val){
-  await fetch('/api/users/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({is_admin:!!val})});
+  const res=await fetch('/api/users/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({is_admin:!!val})});
+  if(!res.ok){const d=await res.json();toast(d.error||'Failed','error');return}
   loadUsersList();
 }
 
@@ -1401,15 +1600,44 @@ async function deleteUser(id){
   await fetch('/api/users/'+id,{method:'DELETE'});toast('User deleted','success');loadUsersList();
 }
 
+async function openUserModal(id){
+  const user=await fetch('/api/users/'+id).then(r=>r.json());
+  $('eu-id').value=user.id;
+  $('eu-name').value=user.display_name;
+  $('eu-color').value=user.color;
+  const avatarEl=$('eu-avatar');
+  if(avatarEl){avatarEl.style.background=user.color;avatarEl.textContent=((user.display_name||'').trim()||'?')[0].toUpperCase();}
+  $('eu-username-display').textContent='@'+user.username;
+  $('eu-role-display').textContent=user.is_admin?'Administrator':'User';
+  $('eu-joined-display').textContent='Joined '+new Date(user.created_at).toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
+  const hhText=user.households&&user.households.length>0?'Household: '+user.households.map(h=>h.name).join(', '):'No household';
+  $('eu-household-display').textContent=hhText;
+  $('user-edit-modal').classList.add('open');
+}
+
+function closeUserModal(){$('user-edit-modal').classList.remove('open')}
+$('user-edit-modal').addEventListener('click',function(e){if(e.target===this)closeUserModal()});
+
+async function saveUserEdit(){
+  const id=parseInt($('eu-id').value,10);
+  const body={display_name:$('eu-name').value.trim(),color:$('eu-color').value};
+  const res=await fetch('/api/users/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const data=await res.json();
+  if(!res.ok){toast(data.error||'Failed to save','error');return}
+  closeUserModal();toast('Profile updated','success');loadUsersList();
+}
+
 async function loadJobsList(){
   const jobs=await fetch('/api/jobs').then(r=>r.json());
-  $('jobs-list').innerHTML=jobs.map(j=>`
-    <div class="user-card"><span class="user-dot" style="background:${j.color}"></span>
-    <div class="user-info"><strong>${esc(j.name)}</strong><small>$${j.default_rate.toFixed(2)}/hr · OT ${j.overtime_threshold||40}h @ ${j.overtime_multiplier||1.5}x · Tips: ${j.tip_payment==='paycheck'?'Paycheck':'Cash'}${j.archived?' · Archived':''}</small></div>
+  $('jobs-list').innerHTML=jobs.map(j=>{
+    const isOwner=!j.user_id||j.user_id===currentUser.id||currentUser.is_admin;
+    const ownerLabel=j.user_id===null?'<span style="font-size:.65rem;color:var(--amber);font-family:var(--mono);margin-left:4px">global</span>':'';
+    return `<div class="user-card"><span class="user-dot" style="background:${j.color}"></span>
+    <div class="user-info"><strong>${esc(j.name)}</strong>${ownerLabel}<small>$${j.default_rate.toFixed(2)}/hr · OT ${j.overtime_threshold||40}h @ ${j.overtime_multiplier||1.5}x · Tips: ${j.tip_payment==='paycheck'?'Paycheck':'Cash'}${j.archived?' · Archived':''}</small></div>
     <div style="display:flex;gap:6px">
-      ${!j.archived?`<button class="btn btn-ghost btn-sm" onclick="editJob(${j.id})">Edit</button><button class="btn btn-danger btn-sm" onclick="deleteJob(${j.id},'${j.name.replace(/'/g,"\\'")}')">Delete</button>`:'<small style="opacity:.5">Archived</small>'}
-    </div></div>
-  `).join('');
+      ${!j.archived&&isOwner?`<button class="btn btn-ghost btn-sm" onclick="editJob(${j.id})">Edit</button><button class="btn btn-danger btn-sm" onclick="deleteJob(${j.id},'${j.name.replace(/'/g,"\\'")}')">Delete</button>`:'<small style="opacity:.5">'+(j.archived?'Archived':'Read-only')+'</small>'}
+    </div></div>`;
+  }).join('');
 }
 
 async function addJob(){
@@ -1451,10 +1679,12 @@ async function deleteJob(id,name){
 
 async function loadGoalsList(){
   const goals=await fetch('/api/goals').then(r=>r.json());
-  $('goals-list').innerHTML=goals.map(g=>`
-    <div class="user-card"><div class="user-info"><strong>${g.period} — $${g.target_amount.toFixed(0)}</strong><small>${g.active?'Active':'Inactive'}</small></div>
-    <button class="btn btn-danger" onclick="deleteGoal(${g.id})">Delete</button></div>
-  `).join('')||'<p class="empty">No goals set.</p>';
+  $('goals-list').innerHTML=goals.map(g=>{
+    const isOwner=!g.user_id||g.user_id===currentUser.id||currentUser.is_admin;
+    return `<div class="user-card"><div class="user-info"><strong>${g.period} — $${g.target_amount.toFixed(0)}</strong><small>${g.active?'Active':'Inactive'}</small></div>
+    ${isOwner?`<button class="btn btn-danger" onclick="deleteGoal(${g.id})">Delete</button>`:'<small style="opacity:.5">Read-only</small>'}
+    </div>`;
+  }).join('')||'<p class="empty">No goals set.</p>';
 }
 
 async function addGoal(){
@@ -1468,6 +1698,107 @@ async function deleteGoal(id){
   await fetch('/api/goals/'+id,{method:'DELETE'});toast('Goal deleted','success');loadGoalsList();
 }
 
+// ── Households ──
+async function loadHouseholds(){
+  // Load pending invitations for current user
+  loadMyInvitations();
+
+  const households=await fetch('/api/households').then(r=>r.json());
+  const el=$('household-list');
+  if(!el)return;
+  if(!households.length){el.innerHTML='<p class="empty" style="margin-bottom:8px">No households yet. Create one or join with an invite code.</p>';return;}
+  el.innerHTML=households.map(h=>`
+    <div class="user-card" style="margin-bottom:10px">
+      <div class="user-info" style="flex:1">
+        <strong>${esc(h.name)}</strong>
+        <small>${h.member_count} member${h.member_count!==1?'s':''}</small>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <span style="font-family:var(--mono);font-size:.7rem;color:var(--text-dim);background:var(--surface2);padding:3px 8px;border-radius:4px" title="Share this code with family members">Code: ${esc(h.invite_code)}</span>
+        <button class="btn btn-ghost btn-sm" onclick="showHouseholdMembers(${h.id},'${esc(h.name)}')">Members</button>
+        <button class="btn btn-ghost btn-sm" onclick="showInviteForm(${h.id},'${esc(h.name)}')">Invite</button>
+        <button class="btn btn-danger btn-sm" onclick="leaveHousehold(${h.id},'${esc(h.name)}')">Leave</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function loadMyInvitations(){
+  const el=$('household-my-invitations');
+  if(!el)return;
+  const invitations=await fetch('/api/households/invitations/mine').then(r=>r.json());
+  if(!invitations.length){el.style.display='none';return;}
+  el.style.display='block';
+  el.innerHTML='<div class="card-label" style="margin-bottom:8px">Pending Invitations</div>'+invitations.map(inv=>`
+    <div class="user-card" style="margin-bottom:8px">
+      <div class="user-info" style="flex:1">
+        <strong>${esc(inv.household_name)}</strong>
+        <small>Invited by ${esc(inv.invited_by_name)} (@${esc(inv.invited_by_username)}) &middot; ${new Date(inv.created_at).toLocaleDateString()}</small>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-primary btn-sm" onclick="acceptInvitation(${inv.id})">Accept</button>
+        <button class="btn btn-ghost btn-sm" onclick="declineInvitation(${inv.id})">Decline</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function acceptInvitation(id){
+  const res=await fetch('/api/households/invitations/'+id+'/accept',{method:'POST'});
+  const d=await res.json();
+  if(!res.ok){toast(d.error||'Error','error');return}
+  toast('Joined household!','success');loadHouseholds();
+}
+
+async function declineInvitation(id){
+  const res=await fetch('/api/households/invitations/'+id+'/decline',{method:'POST'});
+  const d=await res.json();
+  if(!res.ok){toast(d.error||'Error','error');return}
+  toast('Invitation declined','success');loadMyInvitations();
+}
+
+async function createHousehold(){
+  const name=gv('hh-name');
+  if(!name){toast('Enter a household name','error');return}
+  const res=await fetch('/api/households',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
+  if(!res.ok){const d=await res.json();toast(d.error||'Failed to create household','error');return}
+  sv('hh-name','');toast('Household created!','success');loadHouseholds();
+}
+
+async function joinHousehold(){
+  const invite_code=gv('hh-invite');
+  if(!invite_code){toast('Enter an invite code','error');return}
+  const res=await fetch('/api/households/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({invite_code})});
+  const d=await res.json();
+  if(!res.ok){toast(d.error||'Failed to join household','error');return}
+  sv('hh-invite','');toast('Joined household: '+d.household.name,'success');loadHouseholds();
+}
+
+async function leaveHousehold(id,name){
+  if(!confirm('Leave "'+name+'"? You will no longer see shared data from this household.'))return;
+  const res=await fetch('/api/households/'+id+'/leave',{method:'DELETE'});
+  if(!res.ok){const d=await res.json();toast(d.error||'Failed to leave','error');return}
+  toast('Left household','success');loadHouseholds();
+}
+
+async function showHouseholdMembers(id,name){
+  const members=await fetch('/api/households/'+id+'/members').then(r=>r.json());
+  const list=members.map(m=>{
+    const role=m.role==='admin'?' (admin)':'';
+    return '\u2022 '+m.display_name+' (@'+m.username+')'+role;
+  }).join('\n');
+  alert('Members of "'+name+'":\n\n'+list);
+}
+
+async function showInviteForm(id,name){
+  const username=prompt('Invite a user to "'+name+'".\n\nEnter their username:');
+  if(!username)return;
+  const res=await fetch('/api/households/'+id+'/invite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username.trim()})});
+  const d=await res.json();
+  if(!res.ok){toast(d.error||'Failed to invite','error');return}
+  toast('Invitation sent to @'+username.trim(),'success');
+}
+
 // ── Toast ──
 function toast(msg,type=''){const el=document.createElement('div');el.className=`toast ${type}`;el.textContent=msg;$('toasts').appendChild(el);setTimeout(()=>el.remove(),3500)}
 
@@ -1476,8 +1807,8 @@ document.addEventListener('keydown',e=>{
   const tag=document.activeElement.tagName;
   if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT')return;
   if(e.key==='?'){e.preventDefault();$('shortcut-overlay').classList.toggle('open');return}
-  if(e.key==='Escape'){$('shortcut-overlay').classList.remove('open');closeEditModal();return}
-  const idx='123456'.indexOf(e.key);
+  if(e.key==='Escape'){$('shortcut-overlay').classList.remove('open');closeEditModal();closeUserModal();return}
+  const idx='12345'.indexOf(e.key);
   if(idx>=0&&idx<viewKeys.length){
     const navItems=document.querySelectorAll('.nav-item');
     if(navItems[idx])navigate(navItems[idx]);
@@ -1498,143 +1829,8 @@ document.addEventListener('keydown',e=>{
   }
 });
 
-// ── Household ──
-let householdData = null;
-
-async function loadHousehold() {
-  try {
-    const [hhRes, invRes] = await Promise.all([
-      fetch('/api/households/me'),
-      fetch('/api/households/invitations'),
-    ]);
-    const hh = await hhRes.json();
-    const invitations = await invRes.json();
-    householdData = hh.household;
-
-    // Pending incoming invitations (shown even if user is not in a household)
-    const invSection = $('household-invitations-section');
-    const invList = $('household-invitations-list');
-    if (invitations.length) {
-      invSection.style.display = 'block';
-      invList.innerHTML = invitations.map(inv => `
-        <div class="hh-invitation">
-          <div class="hh-invitation-info">
-            <strong>${esc(inv.household_name)}</strong>
-            <small>Invited by ${esc(inv.invited_by_name)} (@${esc(inv.invited_by_username)}) &middot; ${new Date(inv.created_at).toLocaleDateString()}</small>
-          </div>
-          <div class="hh-invitation-actions">
-            <button class="btn btn-primary btn-sm" onclick="acceptInvitation(${inv.id})">Accept</button>
-            <button class="btn btn-ghost btn-sm" onclick="declineInvitation(${inv.id})">Decline</button>
-          </div>
-        </div>`).join('');
-    } else {
-      invSection.style.display = 'none';
-    }
-
-    if (!hh.household) {
-      $('household-create-section').style.display = 'block';
-      $('household-info-section').style.display = 'none';
-    } else {
-      $('household-create-section').style.display = 'none';
-      $('household-info-section').style.display = 'block';
-      $('household-name-display').textContent = hh.household.name;
-      const roleBadge = $('household-role-badge');
-      roleBadge.innerHTML = `<span class="hh-role-badge ${hh.household.role === 'admin' ? 'admin' : ''}">${hh.household.role}</span>`;
-
-      // Members list
-      const membersList = $('household-members-list');
-      membersList.innerHTML = hh.members.map(m => `
-        <div class="hh-member">
-          <span class="user-dot" style="background:${m.color}"></span>
-          <div class="hh-member-info">
-            <strong>${esc(m.display_name)} <span style="color:var(--text-dim);font-weight:400;font-size:.8rem">@${esc(m.username)}</span>${m.id === (currentUser && currentUser.id) ? ' <span style="font-family:var(--mono);font-size:.65rem;color:var(--text-mute)">(you)</span>' : ''}</strong>
-            <small>Joined ${new Date(m.joined_at).toLocaleDateString()}</small>
-          </div>
-          <span class="hh-role-badge ${m.role === 'admin' ? 'admin' : ''}">${m.role}</span>
-          ${hh.household.role === 'admin' && m.id !== (currentUser && currentUser.id) ? `<button class="btn btn-danger btn-sm" onclick="removeMember(${m.id}, '${esc(m.display_name).replace(/'/g,'&#39;')}')">Remove</button>` : ''}
-        </div>`).join('') || '<div class="empty" style="padding:20px">No members yet.</div>';
-
-      // Invite section (admin only)
-      const inviteSection = $('household-invite-section');
-      if (hh.household.role === 'admin') {
-        inviteSection.style.display = 'block';
-        const pending = hh.pending_invitations;
-        const outgoing = $('household-pending-outgoing');
-        if (pending.length) {
-          outgoing.innerHTML = '<div class="card-label" style="margin-bottom:8px;margin-top:12px">Pending Invitations</div>' +
-            pending.map(p => `<div class="hh-member">
-              <div class="hh-member-info"><strong>${esc(p.invitee_display_name)}</strong><small>@${esc(p.invitee_username)} &middot; Sent ${new Date(p.created_at).toLocaleDateString()}</small></div>
-            </div>`).join('');
-        } else {
-          outgoing.innerHTML = '';
-        }
-      } else {
-        inviteSection.style.display = 'none';
-      }
-    }
-  } catch (e) {
-    toast('Failed to load household data', 'error');
-  }
-}
-
-async function createHousehold() {
-  const name = gv('hh-name');
-  if (!name) { toast('Enter a household name', 'error'); return; }
-  const res = await fetch('/api/households', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
-  const data = await res.json();
-  if (!res.ok) { toast(data.error || 'Error', 'error'); return; }
-  toast('Household created!', 'success');
-  sv('hh-name', '');
-  loadHousehold();
-}
-
-async function inviteToHousehold() {
-  const username = gv('hh-invite-user');
-  if (!username) { toast('Enter a username', 'error'); return; }
-  const res = await fetch('/api/households/invite', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username }) });
-  const data = await res.json();
-  if (!res.ok) { toast(data.error || 'Error', 'error'); return; }
-  toast('Invitation sent!', 'success');
-  sv('hh-invite-user', '');
-  loadHousehold();
-}
-
-async function acceptInvitation(id) {
-  const res = await fetch('/api/households/invitations/' + id + '/accept', { method: 'POST' });
-  const data = await res.json();
-  if (!res.ok) { toast(data.error || 'Error', 'error'); return; }
-  toast('Joined household!', 'success');
-  loadHousehold();
-}
-
-async function declineInvitation(id) {
-  const res = await fetch('/api/households/invitations/' + id + '/decline', { method: 'POST' });
-  const data = await res.json();
-  if (!res.ok) { toast(data.error || 'Error', 'error'); return; }
-  toast('Invitation declined', 'success');
-  loadHousehold();
-}
-
-async function leaveHousehold() {
-  if (!confirm('Are you sure you want to leave this household?')) return;
-  const res = await fetch('/api/households/leave', { method: 'DELETE' });
-  const data = await res.json();
-  if (!res.ok) { toast(data.error || 'Error', 'error'); return; }
-  householdData = null;
-  toast('You have left the household', 'success');
-  loadHousehold();
-}
-
-async function removeMember(userId, displayName) {
-  if (!confirm('Remove ' + displayName + ' from the household?')) return;
-  const res = await fetch('/api/households/members/' + userId, { method: 'DELETE' });
-  const data = await res.json();
-  if (!res.ok) { toast(data.error || 'Error', 'error'); return; }
-  toast(displayName + ' removed', 'success');
-  loadHousehold();
-}
-
 // ── Service Worker ──
+if('serviceWorker' in navigator){
   let refreshing=false;
   navigator.serviceWorker.addEventListener('controllerchange',()=>{
     if(refreshing)return;
