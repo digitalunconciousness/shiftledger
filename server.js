@@ -286,6 +286,18 @@ function migrate() {
         )
       `);
     },
+    // v13: assign legacy NULL user_id rows to the first admin user
+    // Shifts, jobs, templates, and goals created before user accounts existed have user_id = NULL.
+    // Assigning them to the first admin prevents them leaking into every user's data views.
+    () => {
+      const admin = db.prepare('SELECT id FROM users WHERE is_admin = 1 ORDER BY id ASC LIMIT 1').get();
+      if (admin) {
+        db.prepare('UPDATE shifts    SET user_id = ? WHERE user_id IS NULL').run(admin.id);
+        db.prepare('UPDATE jobs      SET user_id = ? WHERE user_id IS NULL').run(admin.id);
+        db.prepare('UPDATE templates SET user_id = ? WHERE user_id IS NULL').run(admin.id);
+        db.prepare('UPDATE goals     SET user_id = ? WHERE user_id IS NULL').run(admin.id);
+      }
+    },
   ];
 
   const tx = db.transaction(() => {
