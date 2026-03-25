@@ -74,7 +74,7 @@ Admins can delete any user **except themselves** (self-deletion is blocked to pr
 
 ## Managing Jobs
 
-Jobs represent employers or work locations. Any authenticated user can create jobs, but they're shared across all users (and household members).
+Jobs represent roles or work locations. Any authenticated user can create jobs, and jobs are visible to household members through shared data visibility.
 
 ### Creating a Job
 
@@ -96,6 +96,8 @@ Click **Edit** on any job in the jobs list to open the Edit Job modal. All field
 - OT Threshold — weekly hours before overtime kicks in (default: 40)
 - OT Multiplier — pay multiplier for overtime hours (default: 1.5×)
 - Tips Paid As — Cash (Nightly) or On Paycheck
+- Employer link (optional) — associates the job to an Employer record
+- Tip calculator rounding toggle — controls whether team tip splits are rounded for that job
 
 ### Tip Payment Method
 
@@ -109,6 +111,37 @@ This is configured per-job, so if you have multiple jobs with different tip poli
 ### Archiving a Job
 
 Deleting a job actually **archives** it (sets `archived = 1`). Archived jobs no longer appear in the job dropdown but historical shifts retain their job association.
+
+---
+
+## Managing Employers
+
+Employers are separate records you can link to jobs and fixed recurring income entries.
+
+From **Settings → Employers**:
+1. Add an employer name.
+2. Optionally enable **No Tax** for tax-exempt employers.
+3. Save.
+
+When **No Tax** is enabled, earnings tied to that employer are excluded from taxable-income calculations in the app's tax/paycheck logic.
+
+Deleting an employer archives it and automatically clears any employer links from related jobs and fixed incomes.
+
+---
+
+## Managing Fixed Recurring Income
+
+Use **Settings → Fixed Income** to track recurring income that is not logged as shifts (for example stipends, retainers, or guaranteed monthly payments).
+
+Each fixed income entry supports:
+- Optional employer link
+- Amount
+- Recurrence: weekly, biweekly, semimonthly, monthly, or custom
+- Optional notes
+
+For custom recurrence, provide either an interval (in days) from an anchor date or explicit custom dates.
+
+Archived fixed incomes are hidden from active calculations and lists.
 
 ---
 
