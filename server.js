@@ -21,6 +21,11 @@ const PORT = process.env.PORT || 3000;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'shifts.db');
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 const SESSION_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 days
+const MS_PER_DAY = 86400000;
+const MAX_CUSTOM_INTERVAL_DAYS = 3650;
+const FIXED_INCOME_TAX_RATE = 0;
+// Earliest reasonable default lower bound for "all time" reporting windows.
+const DEFAULT_REPORT_START_DATE = '2000-01-01';
 
 // ── Database Init ────────────────────────────────────────────────────────────
 const db = new Database(DB_PATH);
@@ -346,6 +351,28 @@ function migrate() {
         db.exec('ALTER TABLE jobs ADD COLUMN employer_id INTEGER REFERENCES employers(id)');
       }
     },
+    // v17: fixed recurring income streams
+    () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS fixed_incomes (
+          id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id              INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          employer_id          INTEGER REFERENCES employers(id),
+          amount               REAL    NOT NULL,
+          recurrence           TEXT    NOT NULL,
+          anchor_date          TEXT    DEFAULT '',
+          semimonthly_day1     INTEGER,
+          semimonthly_day2     INTEGER,
+          custom_interval_days INTEGER,
+          custom_dates         TEXT    DEFAULT '',
+          notes                TEXT    DEFAULT '',
+          archived             INTEGER NOT NULL DEFAULT 0,
+          created_at           TEXT    DEFAULT (datetime('now')),
+          updated_at           TEXT    DEFAULT (datetime('now'))
+        )
+      `);
+      db.exec('CREATE INDEX IF NOT EXISTS idx_fixed_incomes_user_archived ON fixed_incomes(user_id, archived)');
+    },
   ];
 
   const tx = db.transaction(() => {
@@ -632,6 +659,36 @@ const EmployerSchema = z.object({
   no_tax: z.boolean().optional().default(false),
 });
 
+const FixedIncomeSchema = z.object({
+  employer_id: z.number().int().nullable().optional().default(null),
+  amount: z.number().positive(),
+  recurrence: z.enum(['weekly', 'biweekly', 'semimonthly', 'monthly', 'custom']),
+  anchor_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal('')).default(''),
+  semimonthly_day1: z.number().int().min(1).max(31).nullable().optional().default(null),
+  semimonthly_day2: z.number().int().min(1).max(31).nullable().optional().default(null),
+  custom_interval_days: z.number().int().min(1).max(MAX_CUSTOM_INTERVAL_DAYS).nullable().optional().default(null),
+  custom_dates: z.string().max(2000).optional().default(''),
+  notes: z.string().max(500).optional().default(''),
+}).superRefine((data, ctx) => {
+  if ((data.recurrence === 'weekly' || data.recurrence === 'biweekly' || data.recurrence === 'monthly') && !data.anchor_date) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['anchor_date'], message: 'anchor_date is required for this recurrence' });
+  }
+  if (data.recurrence === 'custom' && data.custom_interval_days && !data.anchor_date) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['anchor_date'], message: 'anchor_date is required when custom_interval_days is used' });
+  }
+  if (data.recurrence === 'semimonthly') {
+    if (!data.semimonthly_day1 || !data.semimonthly_day2) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['semimonthly_day1'], message: 'semimonthly_day1 and semimonthly_day2 are required for semimonthly' });
+    }
+    if (data.semimonthly_day1 && data.semimonthly_day2 && data.semimonthly_day1 === data.semimonthly_day2) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['semimonthly_day2'], message: 'semimonthly days must be different' });
+    }
+  }
+  if (data.recurrence === 'custom' && !data.custom_interval_days && !(data.custom_dates || '').trim()) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['custom_interval_days'], message: 'Provide custom_interval_days or custom_dates for custom recurrence' });
+  }
+});
+
 const TemplateSchema = z.object({
   name: z.string().min(1).max(100),
   job_id: z.number().int().nullable().optional().default(null),
@@ -749,6 +806,127 @@ function validateEmployerForJobAssignment(employerId, jobOwnerId) {
     return { status: 400, error: 'Employer must belong to the job owner' };
   }
   return null;
+}
+
+function validateEmployerForFixedIncomeAssignment(employerId, ownerId) {
+  if (employerId === null) return null;
+  const employer = db.prepare('SELECT * FROM employers WHERE id = ? AND archived = 0').get(employerId);
+  if (!employer) return { status: 400, error: 'Employer not found' };
+  if (employer.user_id !== ownerId) {
+    return { status: 400, error: 'Employer must belong to the fixed income owner' };
+  }
+  return null;
+}
+
+function parseDateTokenToDayNumber(token) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(token)) return null;
+  const [y, m, d] = token.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== (m - 1) || dt.getUTCDate() !== d) return null;
+  return Math.floor(dt.getTime() / MS_PER_DAY);
+}
+
+function normalizeCustomDates(input = '') {
+  if (!input || typeof input !== 'string') return '';
+  const seen = new Set();
+  const normalized = [];
+  input
+    .split(/[\s,]+/)
+    .map(s => s.trim())
+    .filter(Boolean)
+    .forEach((token) => {
+      const day = parseDateTokenToDayNumber(token);
+      if (day === null) return;
+      if (!seen.has(token)) {
+        seen.add(token);
+        normalized.push(token);
+      }
+    });
+  return normalized.join(',');
+}
+
+function countMonthlyOccurrences(anchorDay, startMonthDay, fromDay, toDay) {
+  if (!Number.isInteger(anchorDay) || anchorDay < 1 || anchorDay > 31) return 0;
+  let count = 0;
+  const fromDate = new Date(fromDay * MS_PER_DAY);
+  const toDate = new Date(toDay * MS_PER_DAY);
+  let year = fromDate.getUTCFullYear();
+  let month = fromDate.getUTCMonth();
+  const toYear = toDate.getUTCFullYear();
+  const toMonth = toDate.getUTCMonth();
+  while (year < toYear || (year === toYear && month <= toMonth)) {
+    const monthDays = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+    const day = Math.min(anchorDay, monthDays);
+    const occurrence = Math.floor(Date.UTC(year, month, day) / MS_PER_DAY);
+    if (occurrence >= fromDay && occurrence <= toDay && occurrence >= startMonthDay) count++;
+    month++;
+    if (month > 11) {
+      month = 0;
+      year++;
+    }
+  }
+  return count;
+}
+
+function countFixedIncomeOccurrences(fi, from, to) {
+  const fromDay = parseDateTokenToDayNumber(from);
+  const toDay = parseDateTokenToDayNumber(to);
+  if (fromDay === null || toDay === null || fromDay > toDay) return 0;
+  if (fi.archived) return 0;
+
+  const recurrence = fi.recurrence;
+  const anchorDay = parseDateTokenToDayNumber(fi.anchor_date || '');
+  const amount = Number(fi.amount);
+  if (!Number.isFinite(amount) || amount <= 0) return 0;
+
+  if (recurrence === 'weekly' || recurrence === 'biweekly' || (recurrence === 'custom' && fi.custom_interval_days)) {
+    if (anchorDay === null) return 0;
+    const interval = recurrence === 'weekly' ? 7 : recurrence === 'biweekly' ? 14 : parseInt(fi.custom_interval_days, 10);
+    if (!Number.isInteger(interval) || interval <= 0) return 0;
+    const firstIndex = Math.max(0, Math.ceil((fromDay - anchorDay) / interval));
+    const lastIndex = Math.floor((toDay - anchorDay) / interval);
+    return Math.max(0, lastIndex - firstIndex + 1);
+  }
+
+  if (recurrence === 'monthly') {
+    if (anchorDay === null) return 0;
+    const anchorDate = new Date(anchorDay * MS_PER_DAY);
+    const dom = anchorDate.getUTCDate();
+    return countMonthlyOccurrences(dom, anchorDay, fromDay, toDay);
+  }
+
+  if (recurrence === 'semimonthly') {
+    const day1 = parseInt(fi.semimonthly_day1, 10);
+    const day2 = parseInt(fi.semimonthly_day2, 10);
+    if (!Number.isInteger(day1) || !Number.isInteger(day2) || day1 < 1 || day1 > 31 || day2 < 1 || day2 > 31 || day1 === day2) return 0;
+    const startDay = anchorDay === null ? fromDay : anchorDay;
+    return countMonthlyOccurrences(day1, startDay, fromDay, toDay) + countMonthlyOccurrences(day2, startDay, fromDay, toDay);
+  }
+
+  if (recurrence === 'custom') {
+    const normalized = normalizeCustomDates(fi.custom_dates || '');
+    if (!normalized) return 0;
+    return normalized.split(',').reduce((sum, token) => {
+      const day = parseDateTokenToDayNumber(token);
+      if (day === null) return sum;
+      return day >= fromDay && day <= toDay ? sum + 1 : sum;
+    }, 0);
+  }
+
+  return 0;
+}
+
+function getFixedIncomeAggregateForRange(from, to, filterUser) {
+  let sql = 'SELECT * FROM fixed_incomes WHERE archived = 0';
+  const params = [];
+  sql = appendUserFilter(sql, params, filterUser);
+  const rows = db.prepare(sql).all(...params);
+  return rows.reduce((acc, fi) => {
+    const occurrences = countFixedIncomeOccurrences(fi, from, to);
+    acc.total += occurrences * Number(fi.amount);
+    acc.occurrences += occurrences;
+    return acc;
+  }, { total: 0, occurrences: 0 });
 }
 
 // ── Auth Routes ──────────────────────────────────────────────────────────────
@@ -1428,9 +1606,111 @@ app.delete('/api/employers/:id', authMiddleware, profileRateLimit, (req, res) =>
     if (employer.user_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Not your employer' });
     const tx = db.transaction(() => {
       db.prepare('UPDATE jobs SET employer_id = NULL WHERE employer_id = ?').run(req.params.id);
+      db.prepare('UPDATE fixed_incomes SET employer_id = NULL WHERE employer_id = ? AND user_id = ?').run(req.params.id, employer.user_id);
       db.prepare('UPDATE employers SET archived = 1 WHERE id = ?').run(req.params.id);
     });
     tx();
+    res.json({ success: true });
+  } catch (e) {
+    internalError(res, e);
+  }
+});
+
+app.get('/api/fixed-incomes', authMiddleware, profileRateLimit, (req, res) => {
+  if (!req.user) return res.json([]);
+  const visibleIds = req.user.is_admin ? null : getVisibleUserIds(req.user.id);
+  let sql = `
+    SELECT fi.*, e.name as employer_name
+    FROM fixed_incomes fi
+    LEFT JOIN employers e ON fi.employer_id = e.id
+    WHERE fi.archived = 0
+  `;
+  const params = [];
+  if (visibleIds !== null) {
+    sql += ` AND fi.user_id IN (${visibleIds.map(() => '?').join(',')})`;
+    params.push(...visibleIds);
+  }
+  sql += ' ORDER BY fi.created_at DESC, fi.id DESC';
+  res.json(db.prepare(sql).all(...params));
+});
+
+app.post('/api/fixed-incomes', authMiddleware, profileRateLimit, validate(FixedIncomeSchema), (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
+    const data = req.validated;
+    const employerValidation = validateEmployerForFixedIncomeAssignment(data.employer_id, req.user.id);
+    if (employerValidation) return res.status(employerValidation.status).json({ error: employerValidation.error });
+    const normalizedCustomDates = normalizeCustomDates(data.custom_dates || '');
+    if (data.recurrence === 'custom' && !data.custom_interval_days && !normalizedCustomDates) {
+      return res.status(400).json({ error: 'Provide custom_interval_days or valid custom_dates for custom recurrence' });
+    }
+    const result = db.prepare(`
+      INSERT INTO fixed_incomes (
+        user_id, employer_id, amount, recurrence, anchor_date,
+        semimonthly_day1, semimonthly_day2, custom_interval_days, custom_dates, notes
+      ) VALUES (?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      req.user.id,
+      data.employer_id,
+      data.amount,
+      data.recurrence,
+      data.anchor_date || '',
+      data.semimonthly_day1,
+      data.semimonthly_day2,
+      data.custom_interval_days,
+      normalizedCustomDates,
+      data.notes || ''
+    );
+    res.status(201).json({ id: result.lastInsertRowid });
+  } catch (e) {
+    internalError(res, e);
+  }
+});
+
+app.put('/api/fixed-incomes/:id', authMiddleware, profileRateLimit, validate(FixedIncomeSchema), (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
+    const row = db.prepare('SELECT * FROM fixed_incomes WHERE id = ? AND archived = 0').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Fixed income not found' });
+    if (row.user_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Not your fixed income' });
+    const data = req.validated;
+    const ownerId = row.user_id;
+    const employerValidation = validateEmployerForFixedIncomeAssignment(data.employer_id, ownerId);
+    if (employerValidation) return res.status(employerValidation.status).json({ error: employerValidation.error });
+    const normalizedCustomDates = normalizeCustomDates(data.custom_dates || '');
+    if (data.recurrence === 'custom' && !data.custom_interval_days && !normalizedCustomDates) {
+      return res.status(400).json({ error: 'Provide custom_interval_days or valid custom_dates for custom recurrence' });
+    }
+    db.prepare(`
+      UPDATE fixed_incomes SET
+        employer_id=?, amount=?, recurrence=?, anchor_date=?, semimonthly_day1=?, semimonthly_day2=?,
+        custom_interval_days=?, custom_dates=?, notes=?, updated_at=datetime('now')
+      WHERE id=?
+    `).run(
+      data.employer_id,
+      data.amount,
+      data.recurrence,
+      data.anchor_date || '',
+      data.semimonthly_day1,
+      data.semimonthly_day2,
+      data.custom_interval_days,
+      normalizedCustomDates,
+      data.notes || '',
+      req.params.id
+    );
+    res.json({ success: true });
+  } catch (e) {
+    internalError(res, e);
+  }
+});
+
+app.delete('/api/fixed-incomes/:id', authMiddleware, profileRateLimit, (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
+    const row = db.prepare('SELECT * FROM fixed_incomes WHERE id = ? AND archived = 0').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Fixed income not found' });
+    if (row.user_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Not your fixed income' });
+    db.prepare("UPDATE fixed_incomes SET archived = 1, updated_at = datetime('now') WHERE id = ?").run(req.params.id);
     res.json({ success: true });
   } catch (e) {
     internalError(res, e);
@@ -1946,7 +2226,7 @@ function getPayPeriodBounds() {
       const daysSince = (now.getDay() - startDay + 7) % 7;
       anchorDate = new Date(now); anchorDate.setDate(now.getDate() - daysSince); anchorDate.setHours(0,0,0,0);
     }
-    const diffDays = Math.floor((now - anchorDate) / 86400000);
+    const diffDays = Math.floor((now - anchorDate) / MS_PER_DAY);
     const cycleDay = ((diffDays % 14) + 14) % 14;
     periodStart = new Date(now); periodStart.setDate(now.getDate() - cycleDay); periodStart.setHours(0,0,0,0);
     periodEnd = new Date(periodStart); periodEnd.setDate(periodEnd.getDate() + 13);
@@ -1977,8 +2257,8 @@ function getPayPeriodBounds() {
     periodLabel = 'Monthly';
   }
 
-  const totalDays = Math.round((periodEnd - periodStart) / 86400000) + 1;
-  const elapsed = Math.round((now - periodStart) / 86400000) + 1;
+  const totalDays = Math.round((periodEnd - periodStart) / MS_PER_DAY) + 1;
+  const elapsed = Math.round((now - periodStart) / MS_PER_DAY) + 1;
   const remaining = Math.max(0, totalDays - elapsed);
 
   return { periodStart, periodEnd, prevStart, prevEnd, periodLabel, totalDays, elapsed, remaining };
@@ -2013,6 +2293,8 @@ app.get('/api/paycheck-estimate', authMiddleware, profileRateLimit, (req, res) =
 
     const current = db.prepare(sumQuery).get(from, to, ...userParam);
     const previous = db.prepare(sumQuery).get(prevFrom, prevTo, ...userParam);
+    const fixedIncomeCurrent = getFixedIncomeAggregateForRange(from, to, filterUser);
+    const fixedIncomePrevious = getFixedIncomeAggregateForRange(prevFrom, prevTo, filterUser);
 
     // Split tips by payment method (cash vs paycheck) based on each shift's job setting
     const tipSplitWhere = filterUser !== null
@@ -2119,11 +2401,15 @@ app.get('/api/paycheck-estimate', authMiddleware, profileRateLimit, (req, res) =
         paycheck_gross: paycheckGross,
         hours: current.hours,
         shifts: current.shifts,
+        fixed_income_total: fixedIncomeCurrent.total,
+        fixed_income_occurrences: fixedIncomeCurrent.occurrences,
       },
       previous: {
         gross: previous.gross,
         hours: previous.hours,
         shifts: previous.shifts,
+        fixed_income_total: fixedIncomePrevious.total,
+        fixed_income_occurrences: fixedIncomePrevious.occurrences,
       },
       taxes: taxBreakdown,
       total_tax: Math.round(totalTax * 100) / 100,
@@ -2314,6 +2600,7 @@ app.get('/api/summary', authMiddleware, (req, res) => {
   const filterUser = resolveUserFilter(req);
 
   const sum = (from, to) => {
+    const fixedIncome = getFixedIncomeAggregateForRange(from, to, filterUser);
     let q = `SELECT COUNT(*) as shifts, COALESCE(SUM(hours_worked),0) as total_hours,
       COALESCE(SUM(wage_total),0) as total_wages, COALESCE(SUM(total_tips),0) as total_tips,
       COALESCE(SUM(grand_total),0) as grand_total, COALESCE(AVG(grand_total),0) as avg_shift,
@@ -2321,7 +2608,18 @@ app.get('/api/summary', authMiddleware, (req, res) => {
       FROM shifts WHERE date >= ? AND date <= ? AND deleted_at IS NULL`;
     const params = [from, to];
     q = appendUserFilter(q, params, filterUser);
-    return db.prepare(q).get(...params);
+    const base = db.prepare(q).get(...params);
+    const combinedGrandTotal = base.grand_total + fixedIncome.total;
+    const taxableShiftIncome = base.total_wages + base.total_tips;
+    const taxableFixedIncome = fixedIncome.total * FIXED_INCOME_TAX_RATE;
+    return {
+      ...base,
+      fixed_income_total: fixedIncome.total,
+      fixed_income_count: fixedIncome.occurrences,
+      taxable_fixed_income: taxableFixedIncome,
+      taxable_total_income: taxableShiftIncome + taxableFixedIncome,
+      grand_total: combinedGrandTotal,
+    };
   };
 
   res.json({
@@ -2331,7 +2629,7 @@ app.get('/api/summary', authMiddleware, (req, res) => {
     this_month: sum(fmt(monthStart), fmt(now)),
     last_month: sum(fmt(lastMonthStart), fmt(lastMonthEnd)),
     ytd: sum(fmt(ytdStart), fmt(now)),
-    all_time: sum('2000-01-01', fmt(now)),
+    all_time: sum(DEFAULT_REPORT_START_DATE, fmt(now)),
   });
 });
 
@@ -2592,6 +2890,10 @@ app.get('/api/export/pdf', authMiddleware, (req, res) => {
     tips: a.tips + s.total_tips,
     grand: a.grand + s.grand_total,
   }), { hours: 0, wages: 0, tips: 0, grand: 0 });
+  const pdfFrom = from || DEFAULT_REPORT_START_DATE;
+  const pdfTo = to || fmt(new Date());
+  const fixedIncomeAgg = getFixedIncomeAggregateForRange(pdfFrom, pdfTo, filterUser);
+  const reportGrandTotal = totals.grand + fixedIncomeAgg.total;
 
   const doc = new PDFDocument({ margin: 50, size: 'LETTER' });
   res.setHeader('Content-Type', 'application/pdf');
@@ -2616,8 +2918,9 @@ app.get('/api/export/pdf', authMiddleware, (req, res) => {
     ['Total Hours', totals.hours.toFixed(2) + ' hrs'],
     ['Hourly Wages', '$' + totals.wages.toFixed(2)],
     ['Total Tips', '$' + totals.tips.toFixed(2)],
+    ['Fixed Income', '$' + fixedIncomeAgg.total.toFixed(2)],
     ['Avg Tips/Hr', '$' + avgTipsPerHour],
-    ['Grand Total', '$' + totals.grand.toFixed(2)],
+    ['Grand Total', '$' + reportGrandTotal.toFixed(2)],
   ];
   summaryItems.forEach(([k, v], i) => {
     const [x1] = cols[i % 3];
