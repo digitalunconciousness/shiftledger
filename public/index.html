@@ -501,7 +501,13 @@ canvas{max-height:280px}
         <div class="divider"></div>
         <div class="form-grid">
           <div class="form-group"><label>Employer Name</label><input id="ne-name"></div>
-          <div class="form-group"><label>No Tax</label><div style="display:flex;align-items:center;height:42px"><input type="checkbox" id="ne-no-tax"></div></div>
+          <div class="form-group">
+            <label>No Tax</label>
+            <label for="ne-no-tax" style="display:flex;align-items:center;gap:10px;min-height:42px;font-family:var(--mono);font-size:.8rem;color:var(--text-dim);cursor:pointer">
+              <input type="checkbox" id="ne-no-tax" onchange="syncNoTaxIndicators()" style="width:auto;appearance:checkbox">
+              <span id="ne-no-tax-state">Taxable employer</span>
+            </label>
+          </div>
           <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addEmployer()">Add Employer</button></div>
         </div>
       </div>
@@ -757,8 +763,8 @@ canvas{max-height:280px}
       <div class="form-group">
         <label>No Tax</label>
         <label for="ee-no-tax" style="display:flex;align-items:center;gap:10px;min-height:42px;font-family:var(--mono);font-size:.8rem;color:var(--text-dim);cursor:pointer">
-          <input type="checkbox" id="ee-no-tax">
-          Exclude this employer from tax estimates
+          <input type="checkbox" id="ee-no-tax" onchange="syncNoTaxIndicators()" style="width:auto;appearance:checkbox">
+          <span id="ee-no-tax-state">Taxable employer</span>
         </label>
       </div>
     </div>
@@ -951,6 +957,14 @@ function setupDecimalInputs(){
   ].forEach(id=>attachDecimalInput(id,2));
 }
 function formatJobDisplayName(job){return job.employer_name?`${job.employer_name} — ${job.name}`:job.name}
+function syncNoTaxIndicators(){
+  const neCheckbox=$('ne-no-tax');
+  const eeCheckbox=$('ee-no-tax');
+  const neLabel=$('ne-no-tax-state');
+  const eeLabel=$('ee-no-tax-state');
+  if(neCheckbox&&neLabel)neLabel.textContent=neCheckbox.checked?'No Tax employer (excluded from tax estimates)':'Taxable employer';
+  if(eeCheckbox&&eeLabel)eeLabel.textContent=eeCheckbox.checked?'No Tax employer (excluded from tax estimates)':'Taxable employer';
+}
 
 function fixedIncomeScheduleLabel(fi){
   const recurrenceMap={weekly:'Weekly',biweekly:'Bi-Weekly',semimonthly:'Semi-Monthly',monthly:'Monthly',custom:'Custom'};
@@ -1613,6 +1627,7 @@ async function loadSettings(){
 
   // Load employers, jobs, goals, tax config for all users
   loadEmployersList();loadFixedIncomesList();loadJobsList();loadGoalsList();loadTaxConfig();loadHouseholds();
+  syncNoTaxIndicators();
   if(currentUser.is_admin){
     loadUsersList();loadAuditLog();
     const s=await loadAppSettings();
@@ -1871,6 +1886,9 @@ function renderPaycheckCard(p){
     const taxBadge=e.no_tax?'<span style="color:var(--green)">No Tax</span>':'<span style="color:var(--text-mute)">Taxable</span>';
     return `<div class="card"><div class="card-label">${esc(e.employer_name)}</div><div class="card-value">$${e.gross.toFixed(2)}</div><div class="card-sub">${e.shifts} shift${e.shifts!==1?'s':''} · ${e.hours.toFixed(1)} hrs · ${taxBadge}</div></div>`;
   }).join('');
+  const fixedIncomeRows=(fixedIncomesCache||[]).map(fi=>{
+    return `<div class="card"><div class="card-label">${esc(fi.employer_name||'Fixed Income')}</div><div class="card-value">$${Number(fi.amount).toFixed(2)}</div><div class="card-sub">${esc(fixedIncomeScheduleLabel(fi))}</div></div>`;
+  }).join('');
   $('paycheck-card').innerHTML=`
     <div class="chart-card" style="margin-bottom:24px">
       <div class="chart-title" style="margin-bottom:4px">PAYCHECK ESTIMATE · ${esc(p.period.type)}</div>
@@ -1884,7 +1902,9 @@ function renderPaycheckCard(p){
       <div class="summary-grid" style="margin-bottom:16px">
         <div class="card"><div class="card-label">Total Earnings</div><div class="card-value" style="color:var(--green)">$${(p.net_pay+p.current.cash_tips).toFixed(2)}</div><div class="card-sub">Net paycheck + cash tips</div></div>
         <div class="card"><div class="card-label">Taxable Income</div><div class="card-value">$${p.current.taxable_gross.toFixed(2)}</div><div class="card-sub">No-tax income: $${p.current.no_tax_income.toFixed(2)}</div></div>
+        <div class="card"><div class="card-label">Fixed Income in Period</div><div class="card-value">$${(p.current.fixed_income_total||0).toFixed(2)}</div><div class="card-sub">${p.current.fixed_income_occurrences||0} occurrence${(p.current.fixed_income_occurrences||0)!==1?'s':''}${p.previous&&p.previous.fixed_income_total?` · Prev $${p.previous.fixed_income_total.toFixed(2)}`:''}</div></div>
       </div>
+      ${fixedIncomeRows?`<div class="chart-title" style="margin:8px 0 10px 0">FIXED INCOME INDICATORS</div><div class="summary-grid" style="margin-bottom:16px">${fixedIncomeRows}</div>`:''}
       ${employerRows?`<div class="chart-title" style="margin:8px 0 10px 0">PAYCHECKS BY EMPLOYER</div><div class="summary-grid" style="margin-bottom:16px">${employerRows}</div>`:''}
       <details style="cursor:pointer"><summary style="font-size:.8rem;font-family:var(--mono);color:var(--text-mute);margin-bottom:8px">Tax Breakdown</summary>${taxRows}</details>
       <div style="font-size:.65rem;color:var(--text-mute);font-family:var(--mono);margin-top:12px;font-style:italic">Estimates are for budgeting only — not tax advice.</div>
@@ -2150,7 +2170,7 @@ async function addEmployer(){
   if(!name){toast('Enter employer name','error');return}
   const res=await fetch('/api/employers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,no_tax})});
   if(!res.ok){const d=await res.json();toast(d.error||'Failed to add employer','error');return}
-  sv('ne-name','');$('ne-no-tax').checked=false;
+  sv('ne-name','');$('ne-no-tax').checked=false;syncNoTaxIndicators();
   toast('Employer added','success');
   loadEmployersList();
   loadJobsList();
@@ -2162,6 +2182,7 @@ function openEmployerModal(id,name,noTax){
   sv('ee-id',id);
   sv('ee-name',name||'');
   $('ee-no-tax').checked=!!noTax;
+  syncNoTaxIndicators();
   $('employer-edit-modal').classList.add('open');
   setTimeout(()=>{const input=$('ee-name');if(input){input.focus();input.select();}},0);
 }
@@ -2171,6 +2192,7 @@ function closeEmployerModal(){
   sv('ee-id','');
   sv('ee-name','');
   $('ee-no-tax').checked=false;
+  syncNoTaxIndicators();
 }
 
 async function saveEmployerEdit(){

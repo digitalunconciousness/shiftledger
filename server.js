@@ -2293,6 +2293,8 @@ app.get('/api/paycheck-estimate', authMiddleware, profileRateLimit, (req, res) =
 
     const current = db.prepare(sumQuery).get(from, to, ...userParam);
     const previous = db.prepare(sumQuery).get(prevFrom, prevTo, ...userParam);
+    const fixedIncomeCurrent = getFixedIncomeAggregateForRange(from, to, filterUser);
+    const fixedIncomePrevious = getFixedIncomeAggregateForRange(prevFrom, prevTo, filterUser);
 
     // Split tips by payment method (cash vs paycheck) based on each shift's job setting
     const tipSplitWhere = filterUser !== null
@@ -2399,11 +2401,15 @@ app.get('/api/paycheck-estimate', authMiddleware, profileRateLimit, (req, res) =
         paycheck_gross: paycheckGross,
         hours: current.hours,
         shifts: current.shifts,
+        fixed_income_total: fixedIncomeCurrent.total,
+        fixed_income_occurrences: fixedIncomeCurrent.occurrences,
       },
       previous: {
         gross: previous.gross,
         hours: previous.hours,
         shifts: previous.shifts,
+        fixed_income_total: fixedIncomePrevious.total,
+        fixed_income_occurrences: fixedIncomePrevious.occurrences,
       },
       taxes: taxBreakdown,
       total_tax: Math.round(totalTax * 100) / 100,
