@@ -61,7 +61,7 @@ There is no build step, transpilation, or bundling. The backend is a single `ser
 
 ## Database Schema
 
-ShiftLedger uses SQLite with WAL mode and foreign keys enabled. The schema is managed through a versioned migration system (currently at **v14**).
+ShiftLedger uses SQLite with WAL mode and foreign keys enabled. The schema is managed through a versioned migration system (currently at **v17**).
 
 ### Tables
 
@@ -110,6 +110,8 @@ ShiftLedger uses SQLite with WAL mode and foreign keys enabled. The schema is ma
 - `overtime_threshold` REAL (default 40)
 - `overtime_multiplier` REAL (default 1.5)
 - `tip_payment` TEXT — `'cash'` or `'paycheck'`
+- `employer_id` INTEGER → `employers(id)` (nullable)
+- `tip_calc_round` INTEGER (0 or 1) — per-job tip calculator rounding preference
 - `user_id` INTEGER → `users(id)` — owner (nullable for legacy rows)
 - `created_at` TEXT
 
@@ -153,6 +155,30 @@ ShiftLedger uses SQLite with WAL mode and foreign keys enabled. The schema is ma
 - `net_amount` REAL
 - `notes` TEXT
 - `created_at` TEXT
+
+**`employers`** — Employer records used for tax handling and job/fixed-income grouping
+- `id` INTEGER PRIMARY KEY
+- `user_id` INTEGER → `users(id)` ON DELETE CASCADE
+- `name` TEXT
+- `no_tax` INTEGER (0 or 1)
+- `archived` INTEGER (0 or 1)
+- `created_at` TEXT
+
+**`fixed_incomes`** — Recurring non-shift income streams
+- `id` INTEGER PRIMARY KEY
+- `user_id` INTEGER → `users(id)` ON DELETE CASCADE
+- `employer_id` INTEGER → `employers(id)` (nullable)
+- `amount` REAL
+- `recurrence` TEXT — `'weekly'`, `'biweekly'`, `'semimonthly'`, `'monthly'`, or `'custom'`
+- `anchor_date` TEXT
+- `semimonthly_day1` INTEGER (nullable)
+- `semimonthly_day2` INTEGER (nullable)
+- `custom_interval_days` INTEGER (nullable)
+- `custom_dates` TEXT
+- `notes` TEXT
+- `archived` INTEGER (0 or 1)
+- `created_at` TEXT
+- `updated_at` TEXT
 
 **`households`** — Named groups of users for shared data access
 - `id` INTEGER PRIMARY KEY
@@ -213,6 +239,9 @@ Migrations are defined as an array of functions in `server.js`. Each function ru
 | v12 | `audit_log` and `password_history` tables |
 | v13 | Assign legacy NULL `user_id` rows to the first admin user |
 | v14 | `household_invitations` table; `role` column on `household_members` |
+| v15 | `tip_calc_round` column on `jobs` |
+| v16 | `employers` table; `employer_id` column on `jobs` |
+| v17 | `fixed_incomes` table |
 
 ### How It Works
 

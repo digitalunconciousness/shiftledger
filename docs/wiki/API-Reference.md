@@ -344,11 +344,57 @@ Restore a soft-deleted shift (clears `deleted_at`).
 
 ---
 
+## Employers
+
+### `GET /api/employers`
+
+List active employers visible to the current user, ordered by name.
+
+Each employer includes: `id`, `user_id`, `name`, `no_tax`, `archived`, `created_at`.
+
+### `POST /api/employers`
+
+Create an employer.
+
+**Body:**
+```json
+{
+  "name": "Restaurant Group LLC",
+  "no_tax": false
+}
+```
+
+- `name` — 1–100 chars (required)
+- `no_tax` — boolean, optional (default `false`)
+  - `true` means earnings associated with this employer are excluded from taxable totals
+
+**Response:** `201` with the created employer object.
+
+### `PUT /api/employers/:id`
+
+Update an employer. Same body as POST.
+
+**Errors:** `404` if not found/archived, `403` if not owner (unless admin).
+
+### `DELETE /api/employers/:id`
+
+Archive an employer (`archived = 1`) and clear employer links on related jobs/fixed incomes.
+
+**Response:** `{"success": true}`
+
+---
+
 ## Jobs
 
 ### `GET /api/jobs`
 
-List all jobs visible to the current user, ordered by name ascending. Includes `tip_payment` and `archived` fields.
+List all jobs visible to the current user. Ordered by employer name (when linked), then job name.
+
+Includes:
+- `tip_payment`, `archived`
+- `employer_id` (nullable)
+- `employer_name` and `employer_no_tax` (joined from employers)
+- `tip_calc_round` (boolean-like integer 0/1 in SQLite-backed rows)
 
 ### `POST /api/jobs`
 
@@ -360,7 +406,9 @@ List all jobs visible to the current user, ordered by name ascending. Includes `
   "color": "#3ecf8e",
   "overtime_threshold": 40,
   "overtime_multiplier": 1.5,
-  "tip_payment": "cash"
+  "tip_payment": "cash",
+  "employer_id": 2,
+  "tip_calc_round": false
 }
 ```
 
@@ -372,6 +420,8 @@ List all jobs visible to the current user, ordered by name ascending. Includes `
 - `tip_payment` — `"cash"` or `"paycheck"` (default `"cash"`)
   - `"cash"` — tips received nightly in cash; excluded from paycheck gross but still taxed
   - `"paycheck"` — tips included in the paycheck
+- `employer_id` — integer or `null`, optional (default `null`)
+- `tip_calc_round` — boolean, optional (default `false`)
 
 ### `PUT /api/jobs/:id`
 
@@ -380,6 +430,55 @@ Update a job. Same body as POST.
 ### `DELETE /api/jobs/:id`
 
 Archive a job (sets `archived = 1`). Does not delete associated shifts.
+
+---
+
+## Fixed Recurring Income
+
+### `GET /api/fixed-incomes`
+
+List active fixed recurring income streams visible to the current user (newest first).
+
+Returns `fixed_incomes` rows plus `employer_name` when linked.
+
+### `POST /api/fixed-incomes`
+
+Create a fixed recurring income stream.
+
+**Body:**
+```json
+{
+  "employer_id": 2,
+  "amount": 250.00,
+  "recurrence": "semimonthly",
+  "anchor_date": "",
+  "semimonthly_day1": 1,
+  "semimonthly_day2": 15,
+  "custom_interval_days": null,
+  "custom_dates": "",
+  "notes": "Housing stipend"
+}
+```
+
+- `employer_id` — integer or `null`, optional
+- `amount` — positive number (required)
+- `recurrence` — one of: `weekly`, `biweekly`, `semimonthly`, `monthly`, `custom`
+- `anchor_date` — `YYYY-MM-DD` required for weekly/biweekly/monthly (and custom when using interval days)
+- `semimonthly_day1` / `semimonthly_day2` — required and must differ for semimonthly recurrence
+- `custom_interval_days` / `custom_dates` — for custom recurrence, provide either interval days or valid CSV dates
+- `notes` — optional string (max 500 chars)
+
+**Response:** `201` with `{ "id": <new_id> }`
+
+### `PUT /api/fixed-incomes/:id`
+
+Update a fixed recurring income stream. Same body as POST.
+
+### `DELETE /api/fixed-incomes/:id`
+
+Archive a fixed recurring income stream (`archived = 1`).
+
+**Response:** `{"success": true}`
 
 ---
 
