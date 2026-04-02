@@ -155,6 +155,15 @@ tr:hover td{background:var(--surface2)}
 .chart-title{font-size:.85rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-dim)}
 canvas{max-height:280px}
 
+/* ── Settings Tabs ── */
+.settings-tabs{display:flex;gap:4px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:3px;width:fit-content;margin-bottom:20px;flex-wrap:wrap}
+.settings-tab-btn{padding:6px 18px;font-size:.8rem;font-family:var(--mono);border-radius:calc(var(--radius) - 2px);cursor:pointer;color:var(--text-dim);border:none;background:transparent;transition:.15s;white-space:nowrap}
+.settings-tab-btn:hover{color:var(--text)}.settings-tab-btn.active{background:var(--amber);color:#0a0a0a;font-weight:600}
+.settings-panel{display:none}.settings-panel.active{display:block}
+
+/* ── Dashboard Quick Actions ── */
+.quick-actions{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}
+
 /* ── Heatmap ── */
 .heatmap{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:24px}
 .heatmap-cell{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 8px;text-align:center}
@@ -231,6 +240,7 @@ canvas{max-height:280px}
   .toast{max-width:100%}
   .btn{min-height:44px}
   td,th{padding:8px 10px}
+  .page-header[style*="justify-content:space-between"]{flex-direction:column;align-items:flex-start}
 }
 
 @media(max-width:900px){
@@ -254,9 +264,13 @@ canvas{max-height:280px}
   .filter-btn{flex:1;text-align:center}
   .chart-header{flex-direction:column;align-items:flex-start}
   .topbar-user{display:none}
-  .page-header[style*="display:flex"]{flex-direction:column;align-items:flex-start}
+  .page-header{flex-direction:column!important;align-items:flex-start!important}
   canvas{max-height:200px}
   .shortcut-box{padding:20px}
+  .settings-tabs{width:100%}
+  .settings-tab-btn{flex:1;text-align:center;padding:6px 10px}
+  .quick-actions{width:100%}
+  .quick-actions .btn{flex:1;justify-content:center}
 }
 </style>
 </head>
@@ -307,10 +321,10 @@ canvas{max-height:280px}
   <div class="sidebar-overlay" id="sidebar-overlay" onclick="toggleSidebar()"></div>
   <nav class="sidebar" id="sidebar" role="navigation" aria-label="Main navigation">
     <div class="nav-section">Main</div>
-    <div class="nav-item active" data-view="log" onclick="navigate(this)" role="button" tabindex="0" aria-current="page">
+    <div class="nav-item" data-view="log" onclick="navigate(this)" role="button" tabindex="0">
       <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12l7-7 7 7"/></svg>Log Shift
     </div>
-    <div class="nav-item" data-view="dashboard" onclick="navigate(this)" role="button" tabindex="0">
+    <div class="nav-item active" data-view="dashboard" onclick="navigate(this)" role="button" tabindex="0" aria-current="page">
       <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Dashboard
     </div>
     <div class="nav-item" onclick="openTipCalcModal()" role="button" tabindex="0" aria-label="Tip Calculator">
@@ -332,7 +346,7 @@ canvas{max-height:280px}
   <main class="main" id="main-content" tabindex="-1">
 
     <!-- ── LOG SHIFT ── -->
-    <div class="view active" id="view-log">
+    <div class="view" id="view-log">
       <div class="page-header">
         <h1 class="page-title">Log a Shift</h1>
         <p class="page-sub">Record your earnings for the night</p>
@@ -372,10 +386,19 @@ canvas{max-height:280px}
     </div>
 
     <!-- ── DASHBOARD ── -->
-    <div class="view" id="view-dashboard">
+    <div class="view active" id="view-dashboard">
       <div class="page-header" style="display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:12px">
         <div><h1 class="page-title">Dashboard</h1><p class="page-sub">Your earnings at a glance</p></div>
         <div class="filter-toggle" id="dash-filter"><button class="filter-btn" onclick="setDashFilter(this,'')" data-uid="">All Shifts</button><button class="filter-btn active" onclick="setDashFilter(this,'mine')" data-uid="mine">My Shifts</button></div>
+      </div>
+      <!-- Quick Actions -->
+      <div class="quick-actions">
+        <button class="btn btn-primary btn-sm" onclick="navigate(document.querySelector('[data-view=log]'))">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12l7-7 7 7"/></svg>Add Shift
+        </button>
+        <button class="btn btn-ghost btn-sm" onclick="openTipCalcModal()">
+          <span aria-hidden="true">🧮</span>Tip Calculator
+        </button>
       </div>
       <div class="summary-grid" id="summary-grid"></div>
       <!-- Goals -->
@@ -466,129 +489,160 @@ canvas{max-height:280px}
     <!-- ── SETTINGS ── -->
     <div class="view" id="view-settings">
       <div class="page-header"><h1 class="page-title">Settings</h1><p class="page-sub">Account & administration</p></div>
-      <!-- My Profile -->
-      <div class="card" style="margin-bottom:20px">
-        <div class="card-label" style="margin-bottom:12px">My Profile</div>
-        <div id="profile-info" style="display:flex;align-items:center;gap:14px;margin-bottom:16px">
-          <div id="profile-avatar" style="width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:700;font-size:1rem;color:#0a0a0a"></div>
-          <div>
-            <div id="profile-username" style="font-family:var(--mono);font-size:.85rem;color:var(--text-dim)"></div>
-            <div id="profile-role" style="font-family:var(--mono);font-size:.72rem;margin-top:2px"></div>
-            <div id="set-joined-display" style="font-family:var(--mono);font-size:.7rem;color:var(--text-mute);margin-top:2px"></div>
-            <div id="set-household-display" style="font-family:var(--mono);font-size:.7rem;color:var(--text-mute);margin-top:2px"></div>
+      <!-- Settings Tab Navigation -->
+      <div class="settings-tabs" role="tablist" aria-label="Settings sections">
+        <button class="settings-tab-btn active" role="tab" aria-selected="true" aria-controls="settings-panel-profile" onclick="showSettingsTab(this,'profile')">Profile</button>
+        <button class="settings-tab-btn" role="tab" aria-selected="false" aria-controls="settings-panel-jobs" onclick="showSettingsTab(this,'jobs')">Jobs &amp; Pay</button>
+        <button class="settings-tab-btn" role="tab" aria-selected="false" aria-controls="settings-panel-admin" id="settings-tab-admin" style="display:none" onclick="showSettingsTab(this,'admin')">Admin</button>
+      </div>
+
+      <!-- Panel: Profile -->
+      <div class="settings-panel active" id="settings-panel-profile" role="tabpanel" aria-labelledby="settings-tab-profile">
+        <!-- My Profile -->
+        <div class="card" style="margin-bottom:20px">
+          <div class="card-label" style="margin-bottom:12px">My Profile</div>
+          <div id="profile-info" style="display:flex;align-items:center;gap:14px;margin-bottom:16px">
+            <div id="profile-avatar" style="width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:700;font-size:1rem;color:#0a0a0a"></div>
+            <div>
+              <div id="profile-username" style="font-family:var(--mono);font-size:.85rem;color:var(--text-dim)"></div>
+              <div id="profile-role" style="font-family:var(--mono);font-size:.72rem;margin-top:2px"></div>
+              <div id="set-joined-display" style="font-family:var(--mono);font-size:.7rem;color:var(--text-mute);margin-top:2px"></div>
+              <div id="set-household-display" style="font-family:var(--mono);font-size:.7rem;color:var(--text-mute);margin-top:2px"></div>
+            </div>
+          </div>
+          <div class="form-grid">
+            <div class="form-group"><label>Display Name</label><input id="set-name"></div>
+            <div class="form-group"><label>Color</label><input type="color" id="set-color" style="height:42px;padding:4px"></div>
+            <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="saveProfile()">Save Profile</button></div>
           </div>
         </div>
-        <div class="form-grid">
-          <div class="form-group"><label>Display Name</label><input id="set-name"></div>
-          <div class="form-group"><label>Color</label><input type="color" id="set-color" style="height:42px;padding:4px"></div>
-          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="saveProfile()">Save Profile</button></div>
-        </div>
-      </div>
-      <!-- Change Password -->
-      <div class="card" style="margin-bottom:20px">
-        <div class="card-label" style="margin-bottom:12px">Change Password</div>
-        <div class="form-grid">
-          <div class="form-group"><label>Current Password</label><input type="password" id="pw-current" autocomplete="current-password"></div>
-          <div class="form-group"><label>New Password</label><input type="password" id="pw-new" placeholder="8+ chars, letter + number/symbol" autocomplete="new-password"></div>
-          <div class="form-group"><label>Confirm New Password</label><input type="password" id="pw-confirm" autocomplete="new-password"></div>
-          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="changePassword()">Change Password</button></div>
-        </div>
-      </div>
-      <!-- Manage Jobs (all users) -->
-      <div class="card" style="margin-bottom:20px">
-        <div class="card-label" style="margin-bottom:12px">My Employers</div>
-        <div id="employers-list"></div>
-        <div class="divider"></div>
-        <div class="form-grid">
-          <div class="form-group"><label>Employer Name</label><input id="ne-name"></div>
-          <div class="form-group">
-            <label>No Tax</label>
-            <label for="ne-no-tax" style="display:flex;align-items:center;gap:10px;min-height:42px;font-family:var(--mono);font-size:.8rem;color:var(--text-dim);cursor:pointer">
-              <input type="checkbox" id="ne-no-tax" onchange="syncNoTaxIndicators()" style="width:auto;appearance:checkbox">
-              <span id="ne-no-tax-state">Taxable employer</span>
-            </label>
+        <!-- Change Password -->
+        <div class="card" style="margin-bottom:20px">
+          <div class="card-label" style="margin-bottom:12px">Change Password</div>
+          <div class="form-grid">
+            <div class="form-group"><label>Current Password</label><input type="password" id="pw-current" autocomplete="current-password"></div>
+            <div class="form-group"><label>New Password</label><input type="password" id="pw-new" placeholder="8+ chars, letter + number/symbol" autocomplete="new-password"></div>
+            <div class="form-group"><label>Confirm New Password</label><input type="password" id="pw-confirm" autocomplete="new-password"></div>
+            <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="changePassword()">Change Password</button></div>
           </div>
-          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addEmployer()">Add Employer</button></div>
+        </div>
+        <!-- Household (all users) -->
+        <div class="card" style="margin-bottom:20px">
+          <div class="card-label" style="margin-bottom:12px">Household</div>
+          <p style="font-size:.75rem;color:var(--text-mute);margin-bottom:12px;font-family:var(--mono)">Join or create a household to share shift data with family members (read-only access to each other's data).</p>
+          <div id="household-my-invitations" style="display:none;margin-bottom:14px"></div>
+          <div id="household-list"></div>
+          <div class="divider"></div>
+          <div class="form-grid">
+            <div class="form-group"><label>Create New Household</label><input id="hh-name" placeholder="e.g. Smith Family"></div>
+            <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="createHousehold()">Create</button></div>
+          </div>
+          <div class="divider"></div>
+          <div class="form-grid">
+            <div class="form-group"><label>Join via Invite Code</label><input id="hh-invite" placeholder="Enter invite code"></div>
+            <div class="form-group" style="justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="joinHousehold()">Join Household</button></div>
+          </div>
         </div>
       </div>
-      <div class="card" style="margin-bottom:20px">
-        <div class="card-label" style="margin-bottom:12px">My Fixed Income</div>
-        <div id="fixed-incomes-list"></div>
-        <div class="divider"></div>
-        <div class="form-grid">
-          <div class="form-group"><label>Employer (optional)</label><select id="nfi-employer"><option value="">— No Employer —</option></select></div>
-          <div class="form-group"><label>Amount ($)</label><input type="number" id="nfi-amount" step="0.01" min="0.01" placeholder="1200.00"></div>
-          <div class="form-group"><label>Recurrence</label><select id="nfi-recurrence" onchange="toggleFixedIncomeOptions()"><option value="weekly">Weekly</option><option value="biweekly">Bi-Weekly</option><option value="semimonthly">Semi-Monthly</option><option value="monthly">Monthly</option><option value="custom">Custom</option></select></div>
-          <div class="form-group"><label>Anchor Date (if used)</label><input type="date" id="nfi-anchor"></div>
-          <div class="form-group full" id="nfi-semimonthly-group" style="display:none"><label>Semi-Monthly Days (e.g., 1,15)</label><input id="nfi-semimonthly-days" placeholder="1,15"></div>
-          <div class="form-group full" id="nfi-custom-group" style="display:none"><label>Custom: Interval Days or Specific Dates</label><input id="nfi-custom-interval" type="number" min="1" step="1" placeholder="Interval in days (optional)"><input id="nfi-custom-dates" style="margin-top:8px" placeholder="YYYY-MM-DD,YYYY-MM-DD"></div>
-          <div class="form-group full"><label>Notes (optional)</label><input id="nfi-notes" maxlength="500" placeholder="Salary, stipend, recurring payment, etc."></div>
-          <div class="form-group" style="justify-content:flex-end;display:flex;gap:8px"><button class="btn btn-primary btn-sm" id="nfi-save-btn" onclick="saveFixedIncome()">Add Fixed Income</button><button class="btn btn-ghost btn-sm" id="nfi-cancel-btn" onclick="cancelFixedIncomeEdit()" style="display:none">Cancel</button></div>
+
+      <!-- Panel: Jobs & Pay -->
+      <div class="settings-panel" id="settings-panel-jobs" role="tabpanel">
+        <!-- My Employers -->
+        <div class="card" style="margin-bottom:20px">
+          <div class="card-label" style="margin-bottom:12px">My Employers</div>
+          <div id="employers-list"></div>
+          <div class="divider"></div>
+          <div class="form-grid">
+            <div class="form-group"><label>Employer Name</label><input id="ne-name"></div>
+            <div class="form-group">
+              <label>No Tax</label>
+              <label for="ne-no-tax" style="display:flex;align-items:center;gap:10px;min-height:42px;font-family:var(--mono);font-size:.8rem;color:var(--text-dim);cursor:pointer">
+                <input type="checkbox" id="ne-no-tax" onchange="syncNoTaxIndicators()" style="width:auto;appearance:checkbox">
+                <span id="ne-no-tax-state">Taxable employer</span>
+              </label>
+            </div>
+          </div>
+          <!-- Tax Rate Configuration (expandable) -->
+          <div style="margin-top:8px">
+            <button class="btn btn-ghost btn-sm" type="button" onclick="toggleEmployerTaxConfig()" id="ne-tax-toggle">⚙ Configure Custom Tax Rates</button>
+          </div>
+          <div id="ne-tax-config" style="display:none;margin-top:12px;padding:12px;background:var(--surface2);border-radius:var(--radius);border:1px solid var(--border)">
+            <div style="font-size:.72rem;color:var(--text-mute);font-family:var(--mono);margin-bottom:10px">Override global tax rates for this employer. Leave blank to use global rates. Enter as decimal (e.g., 0.22 for 22%).</div>
+            <div class="form-grid">
+              <div class="form-group"><label>Wage Tax Rate (optional)</label><input type="number" id="ne-wage-tax-rate" step="0.001" min="0" max="1" placeholder="e.g. 0.22"></div>
+              <div class="form-group"><label>Tip Tax Rate (optional)</label><input type="number" id="ne-tip-tax-rate" step="0.001" min="0" max="1" placeholder="e.g. 0.153"></div>
+            </div>
+            <p style="font-size:.7rem;color:var(--text-mute);font-family:var(--mono);margin-top:4px">Tip: Use Paycheck Entry (Admin tab) to derive these rates from a real paycheck.</p>
+          </div>
+          <div class="form-grid" style="margin-top:12px">
+            <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addEmployer()">Add Employer</button></div>
+          </div>
+        </div>
+        <!-- My Fixed Income -->
+        <div class="card" style="margin-bottom:20px">
+          <div class="card-label" style="margin-bottom:12px">My Fixed Income</div>
+          <div id="fixed-incomes-list"></div>
+          <div class="divider"></div>
+          <div class="form-grid">
+            <div class="form-group"><label>Employer (optional)</label><select id="nfi-employer"><option value="">— No Employer —</option></select></div>
+            <div class="form-group"><label>Amount ($)</label><input type="number" id="nfi-amount" step="0.01" min="0.01" placeholder="1200.00"></div>
+            <div class="form-group"><label>Recurrence</label><select id="nfi-recurrence" onchange="toggleFixedIncomeOptions()"><option value="weekly">Weekly</option><option value="biweekly">Bi-Weekly</option><option value="semimonthly">Semi-Monthly</option><option value="monthly">Monthly</option><option value="custom">Custom</option></select></div>
+            <div class="form-group"><label>Anchor Date (if used)</label><input type="date" id="nfi-anchor"></div>
+            <div class="form-group full" id="nfi-semimonthly-group" style="display:none"><label>Semi-Monthly Days (e.g., 1,15)</label><input id="nfi-semimonthly-days" placeholder="1,15"></div>
+            <div class="form-group full" id="nfi-custom-group" style="display:none"><label>Custom: Interval Days or Specific Dates</label><input id="nfi-custom-interval" type="number" min="1" step="1" placeholder="Interval in days (optional)"><input id="nfi-custom-dates" style="margin-top:8px" placeholder="YYYY-MM-DD,YYYY-MM-DD"></div>
+            <div class="form-group full"><label>Notes (optional)</label><input id="nfi-notes" maxlength="500" placeholder="Salary, stipend, recurring payment, etc."></div>
+            <div class="form-group" style="justify-content:flex-end;display:flex;gap:8px"><button class="btn btn-primary btn-sm" id="nfi-save-btn" onclick="saveFixedIncome()">Add Fixed Income</button><button class="btn btn-ghost btn-sm" id="nfi-cancel-btn" onclick="cancelFixedIncomeEdit()" style="display:none">Cancel</button></div>
+          </div>
+        </div>
+        <!-- My Jobs -->
+        <div class="card" style="margin-bottom:20px">
+          <div class="card-label" style="margin-bottom:12px">My Jobs</div>
+          <div id="jobs-list"></div>
+          <div class="divider"></div>
+          <div class="form-grid">
+            <div class="form-group"><label>Job Name</label><input id="nj-name"></div>
+            <div class="form-group"><label>Employer (optional)</label><select id="nj-employer" style="height:42px"><option value="">— No Employer —</option></select></div>
+            <div class="form-group"><label>Default Rate</label><input type="number" id="nj-rate" step="0.25" min="0" placeholder="0.00"></div>
+            <div class="form-group"><label>Color</label><input type="color" id="nj-color" value="#f5a623" style="height:42px;padding:4px"></div>
+            <div class="form-group"><label>Tips Paid As</label><select id="nj-tip-payment" style="height:42px"><option value="cash">Cash (Nightly)</option><option value="paycheck">On Paycheck</option></select></div>
+            <div class="form-group"><label>Pay Period</label><select id="nj-pay-period" style="height:42px"><option value="global">Global Default</option><option value="weekly">Weekly</option><option value="biweekly">Bi-Weekly</option><option value="semimonthly">Semi-Monthly</option><option value="monthly">Monthly</option></select></div>
+            <div class="form-group"><label for="nj-tip-calc-round" style="text-transform:none;letter-spacing:0;font-size:.75rem;font-family:var(--sans);color:var(--text)"><input type="checkbox" id="nj-tip-calc-round" style="width:auto;appearance:auto;-webkit-appearance:checkbox;margin-right:8px;vertical-align:middle">Round up tip in calculator when saving shift</label></div>
+            <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addJob()">Add Job</button></div>
+          </div>
+        </div>
+        <!-- My Goals -->
+        <div class="card" style="margin-bottom:20px">
+          <div class="card-label" style="margin-bottom:12px">My Goals</div>
+          <div id="goals-list"></div>
+          <div class="divider"></div>
+          <div class="form-grid">
+            <div class="form-group"><label>Period</label><select id="ng-period"><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></div>
+            <div class="form-group"><label>Target ($)</label><input type="number" id="ng-amount" step="1" min="0" placeholder="500"></div>
+            <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addGoal()">Add Goal</button></div>
+          </div>
+        </div>
+        <!-- Tax & Deduction Rates -->
+        <div class="card" style="margin-bottom:20px">
+          <div class="card-label" style="margin-bottom:4px">Tax & Deduction Rates</div>
+          <p style="font-size:.75rem;color:var(--text-mute);margin-bottom:12px;font-family:var(--mono)">Customize your own tax rates. Global defaults are shown; save your own to override.</p>
+          <div id="tax-config-list"></div>
+          <div class="divider"></div>
+          <div class="card-label" style="margin-bottom:8px">Add Custom Deduction</div>
+          <div class="form-grid">
+            <div class="form-group"><label>Key</label><input id="ntc-key" placeholder="e.g. health_ins"></div>
+            <div class="form-group"><label>Label</label><input id="ntc-label" placeholder="e.g. Health Insurance"></div>
+            <div class="form-group"><label>Rate (%)</label><input type="number" id="ntc-rate" step="0.1" min="0" max="100" placeholder="0"></div>
+            <div class="form-group"><label>Flat ($/period)</label><input type="number" id="ntc-flat" step="1" min="0" placeholder="0"></div>
+            <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addTaxConfig()">Add</button></div>
+          </div>
         </div>
       </div>
-      <div class="card" style="margin-bottom:20px">
-        <div class="card-label" style="margin-bottom:12px">My Jobs</div>
-        <div id="jobs-list"></div>
-        <div class="divider"></div>
-        <div class="form-grid">
-          <div class="form-group"><label>Job Name</label><input id="nj-name"></div>
-          <div class="form-group"><label>Employer (optional)</label><select id="nj-employer" style="height:42px"><option value="">— No Employer —</option></select></div>
-          <div class="form-group"><label>Default Rate</label><input type="number" id="nj-rate" step="0.25" min="0" placeholder="0.00"></div>
-          <div class="form-group"><label>Color</label><input type="color" id="nj-color" value="#f5a623" style="height:42px;padding:4px"></div>
-          <div class="form-group"><label>Tips Paid As</label><select id="nj-tip-payment" style="height:42px"><option value="cash">Cash (Nightly)</option><option value="paycheck">On Paycheck</option></select></div>
-          <div class="form-group"><label for="nj-tip-calc-round" style="text-transform:none;letter-spacing:0;font-size:.75rem;font-family:var(--sans);color:var(--text)"><input type="checkbox" id="nj-tip-calc-round" style="width:auto;appearance:auto;-webkit-appearance:checkbox;margin-right:8px;vertical-align:middle">Round up tip in calculator when saving shift</label></div>
-          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addJob()">Add Job</button></div>
-        </div>
-      </div>
-      <!-- Goals (all users) -->
-      <div class="card" style="margin-bottom:20px">
-        <div class="card-label" style="margin-bottom:12px">My Goals</div>
-        <div id="goals-list"></div>
-        <div class="divider"></div>
-        <div class="form-grid">
-          <div class="form-group"><label>Period</label><select id="ng-period"><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></div>
-          <div class="form-group"><label>Target ($)</label><input type="number" id="ng-amount" step="1" min="0" placeholder="500"></div>
-          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addGoal()">Add Goal</button></div>
-        </div>
-      </div>
-      <!-- Tax & Deduction Rates (all users) -->
-      <div class="card" style="margin-bottom:20px">
-        <div class="card-label" style="margin-bottom:4px">Tax & Deduction Rates</div>
-        <p style="font-size:.75rem;color:var(--text-mute);margin-bottom:12px;font-family:var(--mono)">Customize your own tax rates. Global defaults are shown; save your own to override.</p>
-        <div id="tax-config-list"></div>
-        <div class="divider"></div>
-        <div class="card-label" style="margin-bottom:8px">Add Custom Deduction</div>
-        <div class="form-grid">
-          <div class="form-group"><label>Key</label><input id="ntc-key" placeholder="e.g. health_ins"></div>
-          <div class="form-group"><label>Label</label><input id="ntc-label" placeholder="e.g. Health Insurance"></div>
-          <div class="form-group"><label>Rate (%)</label><input type="number" id="ntc-rate" step="0.1" min="0" max="100" placeholder="0"></div>
-          <div class="form-group"><label>Flat ($/period)</label><input type="number" id="ntc-flat" step="1" min="0" placeholder="0"></div>
-          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addTaxConfig()">Add</button></div>
-        </div>
-      </div>
-      <!-- Household (all users) -->
-      <div class="card" style="margin-bottom:20px">
-        <div class="card-label" style="margin-bottom:12px">Household</div>
-        <p style="font-size:.75rem;color:var(--text-mute);margin-bottom:12px;font-family:var(--mono)">Join or create a household to share shift data with family members (read-only access to each other's data).</p>
-        <!-- Pending invitations for current user -->
-        <div id="household-my-invitations" style="display:none;margin-bottom:14px"></div>
-        <div id="household-list"></div>
-        <div class="divider"></div>
-        <div class="form-grid">
-          <div class="form-group"><label>Create New Household</label><input id="hh-name" placeholder="e.g. Smith Family"></div>
-          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="createHousehold()">Create</button></div>
-        </div>
-        <div class="divider"></div>
-        <div class="form-grid">
-          <div class="form-group"><label>Join via Invite Code</label><input id="hh-invite" placeholder="Enter invite code"></div>
-          <div class="form-group" style="justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick="joinHousehold()">Join Household</button></div>
-        </div>
-      </div>
-      <!-- Admin Section -->
-      <div id="admin-section" style="display:none">
+
+      <!-- Panel: Admin -->
+      <div class="settings-panel" id="settings-panel-admin" role="tabpanel">
         <!-- Manage Users -->
         <div class="card" style="margin-bottom:20px">
-          <div class="card-label" style="margin-bottom:12px">Manage Users (Admin)</div>
+          <div class="card-label" style="margin-bottom:12px">Manage Users</div>
           <div id="users-list"></div>
           <div class="divider"></div>
           <div class="card-label" style="margin-bottom:12px">Add New User</div>
@@ -600,7 +654,7 @@ canvas{max-height:280px}
           </div>
         </div>
         <div class="card" style="margin-bottom:20px">
-          <div class="card-label" style="margin-bottom:12px">App Settings (Admin)</div>
+          <div class="card-label" style="margin-bottom:12px">App Settings</div>
           <div class="form-grid">
             <div class="form-group">
               <label>Pay Week Starts On</label>
@@ -615,11 +669,11 @@ canvas{max-height:280px}
               </select>
             </div>
             <div class="form-group">
-              <label>Pay Period</label>
+              <label>Default Pay Period</label>
               <select id="set-pay-period" onchange="toggleAnchor()">
                 <option value="weekly">Weekly</option>
                 <option value="biweekly">Bi-Weekly</option>
-                <option value="semimonthly">Semi-Monthly (1st & 15th)</option>
+                <option value="semimonthly">Semi-Monthly (1st &amp; 15th)</option>
                 <option value="monthly">Monthly</option>
               </select>
             </div>
@@ -662,7 +716,7 @@ canvas{max-height:280px}
           </div>
           <div style="font-size:.68rem;color:var(--text-mute);font-family:var(--mono);margin-top:8px" id="tp-meta-line"></div>
         </div>
-        <!-- Paycheck Entry (Admin) -->
+        <!-- Paycheck Entry -->
         <div class="card" style="margin-bottom:20px">
           <div class="card-label" style="margin-bottom:4px">Paycheck Entry</div>
           <p style="font-size:.75rem;color:var(--text-mute);margin-bottom:12px;font-family:var(--mono)">Enter real paycheck data to calculate actual withholding rates and optionally apply them to your tax config.</p>
@@ -746,6 +800,7 @@ canvas{max-height:280px}
       <div class="form-group"><label>OT Threshold (hrs/wk)</label><input type="number" id="ej-ot-threshold" step="1" min="0" value="40"></div>
       <div class="form-group"><label>OT Multiplier</label><input type="number" id="ej-ot-multiplier" step="0.1" min="1" value="1.5"></div>
       <div class="form-group"><label>Tips Paid As</label><select id="ej-tip-payment" style="height:42px"><option value="cash">Cash (Nightly)</option><option value="paycheck">On Paycheck</option></select></div>
+      <div class="form-group"><label>Pay Period</label><select id="ej-pay-period" style="height:42px"><option value="global">Global Default</option><option value="weekly">Weekly</option><option value="biweekly">Bi-Weekly</option><option value="semimonthly">Semi-Monthly</option><option value="monthly">Monthly</option></select></div>
       <div class="form-group"><label for="ej-tip-calc-round" style="text-transform:none;letter-spacing:0;font-size:.75rem;font-family:var(--sans);color:var(--text)"><input type="checkbox" id="ej-tip-calc-round" style="width:auto;appearance:auto;-webkit-appearance:checkbox;margin-right:8px;vertical-align:middle">Round up tip in calculator when saving shift</label></div>
     </div>
     <div class="divider"></div>
@@ -766,6 +821,17 @@ canvas{max-height:280px}
           <input type="checkbox" id="ee-no-tax" onchange="syncNoTaxIndicators()" style="width:auto;appearance:checkbox">
           <span id="ee-no-tax-state">Taxable employer</span>
         </label>
+      </div>
+    </div>
+    <!-- Tax Rate Configuration (expandable) -->
+    <div style="margin-top:12px">
+      <button class="btn btn-ghost btn-sm" type="button" onclick="toggleEmployerTaxConfigModal()" id="ee-tax-toggle">⚙ Configure Custom Tax Rates</button>
+    </div>
+    <div id="ee-tax-config" style="display:none;margin-top:12px;padding:12px;background:var(--surface2);border-radius:var(--radius);border:1px solid var(--border)">
+      <div style="font-size:.72rem;color:var(--text-mute);font-family:var(--mono);margin-bottom:10px">Override global tax rates for this employer. Leave blank to use global rates. Enter as decimal (e.g., 0.22 for 22%).</div>
+      <div class="form-grid">
+        <div class="form-group"><label>Wage Tax Rate (optional)</label><input type="number" id="ee-wage-tax-rate" step="0.001" min="0" max="1" placeholder="e.g. 0.22"></div>
+        <div class="form-group"><label>Tip Tax Rate (optional)</label><input type="number" id="ee-tip-tax-rate" step="0.001" min="0" max="1" placeholder="e.g. 0.153"></div>
       </div>
     </div>
     <div class="divider"></div>
@@ -926,12 +992,18 @@ function enterApp(){
   document.getElementById('topbar-user').innerHTML=`<span class="user-dot" style="background:${currentUser.color}"></span>${esc(currentUser.display_name)}`;
   loadAppSettings();
   document.getElementById('f-date').value=today();
-  if(currentUser.is_admin) document.getElementById('admin-section').style.display='block';
+  if(currentUser.is_admin){
+    const adminTab=$('settings-tab-admin');
+    if(adminTab) adminTab.style.display='';
+  }
   loadEmployers();loadJobs();loadTemplates();
   // tip mode label
   document.querySelectorAll('input[name="tip-mode"]').forEach(r=>r.addEventListener('change',()=>{
     document.getElementById('tip-label').textContent=r.value==='per_hour'?'Tips Per Hour ($)':'Total Tips for Night ($)';
   }));
+  // Navigate to dashboard by default
+  const dashNav=document.querySelector('.nav-item[data-view="dashboard"]');
+  if(dashNav) navigate(dashNav);
 }
 
 // ── Helpers ──
@@ -1468,8 +1540,25 @@ function setTrendPeriod(el){
 }
 
 function chartColors(){
-  const t=document.documentElement.dataset.theme;
-  return{grid:t==='dark'?'#1a1a1a':'#e0e0e0',tick:t==='dark'?'#666':'#999',legend:t==='dark'?'#888':'#666',tooltip:{bg:t==='dark'?'#1b1b1b':'#fff',border:t==='dark'?'#333':'#ccc',title:t==='dark'?'#888':'#666',body:t==='dark'?'#e8e8e8':'#222'}};
+  const isDark=document.documentElement.dataset.theme==='dark';
+  const cs=getComputedStyle(document.documentElement);
+  const amber=cs.getPropertyValue('--amber').trim()||'#f5a623';
+  const green=cs.getPropertyValue('--green').trim()||'#3ecf8e';
+  return{
+    wages:isDark?'rgba(100,148,172,0.75)':'rgba(55,105,150,0.75)',
+    wagesBorder:isDark?'#6494ac':'#3769a0',
+    tips:isDark?'rgba(126,206,227,0.72)':'rgba(46,140,175,0.72)',
+    tipsBorder:isDark?'#7ecee3':'#2e8caf',
+    total:amber,
+    tipLine:isDark?'#7ecee3':'#2e8caf',
+    tipFill:isDark?'rgba(126,206,227,0.12)':'rgba(46,140,175,0.1)',
+    effLine:green,
+    effFill:isDark?'rgba(62,207,142,0.12)':'rgba(26,158,94,0.1)',
+    grid:isDark?'rgba(255,255,255,0.05)':'rgba(0,0,0,0.07)',
+    tick:isDark?'#666':'#888',
+    legend:isDark?'#888':'#666',
+    tooltip:{bg:isDark?'#1b1b1b':'#fff',border:isDark?'#333':'#ccc',title:isDark?'#888':'#666',body:isDark?'#e8e8e8':'#222'}
+  };
 }
 
 function formatLabels(data){
@@ -1483,28 +1572,28 @@ function renderTrendChart(data){
   const ctx=$('trend-chart').getContext('2d');if(trendChart)trendChart.destroy();
   const c=chartColors();
   trendChart=new Chart(ctx,{type:'bar',data:{labels:formatLabels(data),datasets:[
-    {label:'Wages',data:data.map(d=>d.total_wages),backgroundColor:'#2a2a2a',borderColor:'#444',borderWidth:1,borderRadius:3},
-    {label:'Tips',data:data.map(d=>d.total_tips),backgroundColor:'#1c3a44',borderColor:'#7ecee3',borderWidth:1,borderRadius:3},
-    {label:'Total',data:data.map(d=>d.grand_total),type:'line',borderColor:'#f5a623',backgroundColor:'transparent',borderWidth:2,pointBackgroundColor:'#f5a623',pointRadius:3,tension:.3}
-  ]},options:{responsive:true,plugins:{legend:{labels:{color:c.legend,font:{family:'IBM Plex Mono',size:11},boxWidth:12}},tooltip:{backgroundColor:c.tooltip.bg,borderColor:c.tooltip.border,borderWidth:1,titleColor:c.tooltip.title,bodyColor:c.tooltip.body,callbacks:{label:ctx=>` ${ctx.dataset.label}: $${formatFixed(ctx.raw)}`}}},scales:{x:{ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10}},grid:{color:c.grid}},y:{ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10},callback:v=>formatMoneyTick(v)},grid:{color:c.grid}}}}});
+    {label:'Wages',data:data.map(d=>d.total_wages),backgroundColor:c.wages,borderColor:c.wagesBorder,borderWidth:1,borderRadius:4},
+    {label:'Tips',data:data.map(d=>d.total_tips),backgroundColor:c.tips,borderColor:c.tipsBorder,borderWidth:1,borderRadius:4},
+    {label:'Total',data:data.map(d=>d.grand_total),type:'line',borderColor:c.total,backgroundColor:'transparent',borderWidth:2,pointBackgroundColor:c.total,pointRadius:4,tension:.3}
+  ]},options:{responsive:true,maintainAspectRatio:true,plugins:{legend:{labels:{color:c.legend,font:{family:'IBM Plex Mono',size:12},boxWidth:14,padding:14}},tooltip:{backgroundColor:c.tooltip.bg,borderColor:c.tooltip.border,borderWidth:1,titleColor:c.tooltip.title,bodyColor:c.tooltip.body,padding:10,callbacks:{label:ctx=>` ${ctx.dataset.label}: $${formatFixed(ctx.raw)}`}}},scales:{x:{ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:11}},grid:{color:c.grid}},y:{ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:11},callback:v=>formatMoneyTick(v)},grid:{color:c.grid}}}}});
 }
 
 function renderBreakdownChart(data){
   const ctx=$('breakdown-chart').getContext('2d');if(breakdownChart)breakdownChart.destroy();const c=chartColors();
   breakdownChart=new Chart(ctx,{type:'bar',data:{labels:formatLabels(data),datasets:[
-    {label:'Wages',data:data.map(d=>d.total_wages),backgroundColor:'#2e2e2e',borderRadius:2},
-    {label:'Tips',data:data.map(d=>d.total_tips),backgroundColor:'#1c3a44',borderRadius:2}
-  ]},options:{responsive:true,plugins:{legend:{labels:{color:c.legend,font:{family:'IBM Plex Mono',size:11},boxWidth:12}},tooltip:{backgroundColor:c.tooltip.bg,borderColor:c.tooltip.border,borderWidth:1,titleColor:c.tooltip.title,bodyColor:c.tooltip.body,callbacks:{label:ctx=>` ${ctx.dataset.label}: $${formatFixed(ctx.raw)}`}}},scales:{x:{stacked:true,ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10}},grid:{color:c.grid}},y:{stacked:true,ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10},callback:v=>formatMoneyTick(v)},grid:{color:c.grid}}}}});
+    {label:'Wages',data:data.map(d=>d.total_wages),backgroundColor:c.wages,borderColor:c.wagesBorder,borderWidth:1,borderRadius:2},
+    {label:'Tips',data:data.map(d=>d.total_tips),backgroundColor:c.tips,borderColor:c.tipsBorder,borderWidth:1,borderRadius:2}
+  ]},options:{responsive:true,maintainAspectRatio:true,plugins:{legend:{labels:{color:c.legend,font:{family:'IBM Plex Mono',size:12},boxWidth:14,padding:14}},tooltip:{backgroundColor:c.tooltip.bg,borderColor:c.tooltip.border,borderWidth:1,titleColor:c.tooltip.title,bodyColor:c.tooltip.body,padding:10,callbacks:{label:ctx=>` ${ctx.dataset.label}: $${formatFixed(ctx.raw)}`}}},scales:{x:{stacked:true,ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:11}},grid:{color:c.grid}},y:{stacked:true,ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:11},callback:v=>formatMoneyTick(v)},grid:{color:c.grid}}}}});
 }
 
 function renderTipRatioChart(data){
   const ctx=$('tipratio-chart').getContext('2d');if(tipRatioChart)tipRatioChart.destroy();const c=chartColors();
-  tipRatioChart=new Chart(ctx,{type:'line',data:{labels:data.map(d=>{const[y,m]=d.period.split('-');return new Date(y,m-1).toLocaleDateString('en-US',{month:'short',year:'2-digit'})}),datasets:[{label:'Tip %',data:data.map(d=>d.tip_pct),borderColor:'#7ecee3',backgroundColor:'rgba(126,206,227,0.1)',fill:true,borderWidth:2,pointRadius:3,tension:.3}]},options:{responsive:true,plugins:{legend:{labels:{color:c.legend,font:{family:'IBM Plex Mono',size:11},boxWidth:12}},tooltip:{backgroundColor:c.tooltip.bg,borderColor:c.tooltip.border,borderWidth:1,titleColor:c.tooltip.title,bodyColor:c.tooltip.body,callbacks:{label:ctx=>` ${formatFixed(ctx.raw)}%`}}},scales:{x:{ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10}},grid:{color:c.grid}},y:{ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10},callback:v=>formatFixed(v)+'%'},grid:{color:c.grid}}}}});
+  tipRatioChart=new Chart(ctx,{type:'line',data:{labels:data.map(d=>{const[y,m]=d.period.split('-');return new Date(y,m-1).toLocaleDateString('en-US',{month:'short',year:'2-digit'})}),datasets:[{label:'Tip %',data:data.map(d=>d.tip_pct),borderColor:c.tipLine,backgroundColor:c.tipFill,fill:true,borderWidth:2,pointBackgroundColor:c.tipLine,pointRadius:4,tension:.3}]},options:{responsive:true,maintainAspectRatio:true,plugins:{legend:{labels:{color:c.legend,font:{family:'IBM Plex Mono',size:12},boxWidth:14,padding:14}},tooltip:{backgroundColor:c.tooltip.bg,borderColor:c.tooltip.border,borderWidth:1,titleColor:c.tooltip.title,bodyColor:c.tooltip.body,padding:10,callbacks:{label:ctx=>` ${formatFixed(ctx.raw)}%`}}},scales:{x:{ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:11}},grid:{color:c.grid}},y:{ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:11},callback:v=>formatFixed(v)+'%'},grid:{color:c.grid}}}}});
 }
 
 function renderEffRateChart(data){
   const ctx=$('effrate-chart').getContext('2d');if(effRateChart)effRateChart.destroy();const c=chartColors();
-  effRateChart=new Chart(ctx,{type:'line',data:{labels:formatLabels(data),datasets:[{label:'Effective $/Hr',data:data.map(d=>d.effective_rate),borderColor:'#3ecf8e',backgroundColor:'rgba(62,207,142,0.1)',fill:true,borderWidth:2,pointRadius:3,tension:.3}]},options:{responsive:true,plugins:{legend:{labels:{color:c.legend,font:{family:'IBM Plex Mono',size:11},boxWidth:12}},tooltip:{backgroundColor:c.tooltip.bg,borderColor:c.tooltip.border,borderWidth:1,titleColor:c.tooltip.title,bodyColor:c.tooltip.body,callbacks:{label:ctx=>` $${formatFixed(ctx.raw)}/hr`}}},scales:{x:{ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10}},grid:{color:c.grid}},y:{ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:10},callback:v=>formatMoneyTick(v)},grid:{color:c.grid}}}}});
+  effRateChart=new Chart(ctx,{type:'line',data:{labels:formatLabels(data),datasets:[{label:'Effective $/Hr',data:data.map(d=>d.effective_rate),borderColor:c.effLine,backgroundColor:c.effFill,fill:true,borderWidth:2,pointBackgroundColor:c.effLine,pointRadius:4,tension:.3}]},options:{responsive:true,maintainAspectRatio:true,plugins:{legend:{labels:{color:c.legend,font:{family:'IBM Plex Mono',size:12},boxWidth:14,padding:14}},tooltip:{backgroundColor:c.tooltip.bg,borderColor:c.tooltip.border,borderWidth:1,titleColor:c.tooltip.title,bodyColor:c.tooltip.body,padding:10,callbacks:{label:ctx=>` $${formatFixed(ctx.raw)}/hr`}}},scales:{x:{ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:11}},grid:{color:c.grid}},y:{ticks:{color:c.tick,font:{family:'IBM Plex Mono',size:11},callback:v=>formatMoneyTick(v)},grid:{color:c.grid}}}}});
 }
 
 // ── History ──
@@ -1638,6 +1727,32 @@ async function loadSettings(){
     loadTaxProfiles();
     loadPaycheckHistory();
   }
+}
+
+function showSettingsTab(btn,panel){
+  document.querySelectorAll('.settings-tab-btn').forEach(b=>{b.classList.remove('active');b.setAttribute('aria-selected','false')});
+  document.querySelectorAll('.settings-panel').forEach(p=>p.classList.remove('active'));
+  btn.classList.add('active');btn.setAttribute('aria-selected','true');
+  const el=$('settings-panel-'+panel);
+  if(el) el.classList.add('active');
+}
+
+function toggleEmployerTaxConfig(){
+  const el=$('ne-tax-config');
+  const btn=$('ne-tax-toggle');
+  if(!el)return;
+  const isOpen=el.style.display!=='none';
+  el.style.display=isOpen?'none':'';
+  if(btn)btn.textContent=isOpen?'⚙ Configure Custom Tax Rates':'⚙ Hide Tax Rate Config';
+}
+
+function toggleEmployerTaxConfigModal(){
+  const el=$('ee-tax-config');
+  const btn=$('ee-tax-toggle');
+  if(!el)return;
+  const isOpen=el.style.display!=='none';
+  el.style.display=isOpen?'none':'';
+  if(btn)btn.textContent=isOpen?'⚙ Configure Custom Tax Rates':'⚙ Hide Tax Rate Config';
 }
 
 function toggleAnchor(){
@@ -2035,12 +2150,14 @@ async function saveUserEdit(){
 
 async function loadJobsList(){
   const jobs=await fetch('/api/jobs').then(r=>r.json());
+  const payPeriodLabels={global:'Global',weekly:'Weekly',biweekly:'Bi-Weekly',semimonthly:'Semi-Monthly',monthly:'Monthly'};
   $('jobs-list').innerHTML=jobs.map(j=>{
     const isOwner=!j.user_id||j.user_id===currentUser.id||currentUser.is_admin;
     const ownerLabel=j.user_id===null?'<span style="font-size:.65rem;color:var(--amber);font-family:var(--mono);margin-left:4px">global</span>':'';
     const employerLabel=j.employer_name?` · Employer: ${esc(j.employer_name)}${j.employer_no_tax?' (No Tax)':''}`:' · Employer: None';
+    const ppLabel=j.pay_period&&j.pay_period!=='global'?` · Pay Period: ${payPeriodLabels[j.pay_period]||j.pay_period}`:'';
     return `<div class="user-card"><span class="user-dot" style="background:${j.color}"></span>
-    <div class="user-info"><strong>${esc(j.name)}</strong>${ownerLabel}<small>$${j.default_rate.toFixed(2)}/hr · OT ${j.overtime_threshold||40}h @ ${j.overtime_multiplier||1.5}x · Tips: ${j.tip_payment==='paycheck'?'Paycheck':'Cash'} · Tip Calc Save: ${j.tip_calc_round?'Round':'Truncate'}${employerLabel}${j.archived?' · Archived':''}</small></div>
+    <div class="user-info"><strong>${esc(j.name)}</strong>${ownerLabel}<small>$${j.default_rate.toFixed(2)}/hr · OT ${j.overtime_threshold||40}h @ ${j.overtime_multiplier||1.5}x · Tips: ${j.tip_payment==='paycheck'?'Paycheck':'Cash'} · Tip Calc Save: ${j.tip_calc_round?'Round':'Truncate'}${ppLabel}${employerLabel}${j.archived?' · Archived':''}</small></div>
     <div style="display:flex;gap:6px">
       ${!j.archived&&isOwner?`<button class="btn btn-ghost btn-sm" onclick="editJob(${j.id})">Edit</button><button class="btn btn-danger btn-sm" onclick="deleteJob(${j.id},'${j.name.replace(/'/g,"\\'")}')">Delete</button>`:'<small style="opacity:.5">'+(j.archived?'Archived':'Read-only')+'</small>'}
     </div></div>`;
@@ -2052,8 +2169,9 @@ async function loadEmployersList(){
   $('employers-list').innerHTML=employers.map(e=>{
     const canEdit=e.user_id===currentUser.id||currentUser.is_admin;
     const jsonName=JSON.stringify(e.name);
-    return `<div class="user-card"><div class="user-info"><strong>${esc(e.name)}</strong><small>${e.no_tax?'No Tax (excluded from tax estimates)':'Taxable employer'}</small></div>
-    <div style="display:flex;gap:6px">${canEdit?`<button class="btn btn-ghost btn-sm" onclick='openEmployerModal(${e.id},${jsonName},${e.no_tax?1:0})'>Edit</button><button class="btn btn-danger btn-sm" onclick='deleteEmployer(${e.id},${jsonName})'>Delete</button>`:''}</div></div>`;
+    const taxRates=e.wage_tax_rate!=null||e.tip_tax_rate!=null?` · Custom rates: Wage ${e.wage_tax_rate!=null?(e.wage_tax_rate*100).toFixed(1)+'%':'global'}, Tip ${e.tip_tax_rate!=null?(e.tip_tax_rate*100).toFixed(1)+'%':'global'}`:'';
+    return `<div class="user-card"><div class="user-info"><strong>${esc(e.name)}</strong><small>${e.no_tax?'No Tax (excluded from tax estimates)':'Taxable employer'}${taxRates}</small></div>
+    <div style="display:flex;gap:6px">${canEdit?`<button class="btn btn-ghost btn-sm" onclick='openEmployerModal(${e.id},${jsonName},${e.no_tax?1:0},${e.wage_tax_rate!=null?e.wage_tax_rate:'null'},${e.tip_tax_rate!=null?e.tip_tax_rate:'null'})'>Edit</button><button class="btn btn-danger btn-sm" onclick='deleteEmployer(${e.id},${jsonName})'>Delete</button>`:''}</div></div>`;
   }).join('')||'<p class="empty">No employers yet.</p>';
   loadEmployers();
 }
@@ -2167,10 +2285,17 @@ async function deleteFixedIncome(id){
 async function addEmployer(){
   const name=gv('ne-name');
   const no_tax=$('ne-no-tax').checked;
+  const wageRateStr=gv('ne-wage-tax-rate');
+  const tipRateStr=gv('ne-tip-tax-rate');
+  const wage_tax_rate=wageRateStr!==''?parseFloat(wageRateStr):null;
+  const tip_tax_rate=tipRateStr!==''?parseFloat(tipRateStr):null;
   if(!name){toast('Enter employer name','error');return}
-  const res=await fetch('/api/employers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,no_tax})});
+  const res=await fetch('/api/employers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,no_tax,wage_tax_rate,tip_tax_rate})});
   if(!res.ok){const d=await res.json();toast(d.error||'Failed to add employer','error');return}
-  sv('ne-name','');$('ne-no-tax').checked=false;syncNoTaxIndicators();
+  sv('ne-name','');$('ne-no-tax').checked=false;sv('ne-wage-tax-rate','');sv('ne-tip-tax-rate','');
+  const taxConfig=$('ne-tax-config');if(taxConfig)taxConfig.style.display='none';
+  const taxToggle=$('ne-tax-toggle');if(taxToggle)taxToggle.textContent='⚙ Configure Custom Tax Rates';
+  syncNoTaxIndicators();
   toast('Employer added','success');
   loadEmployersList();
   loadJobsList();
@@ -2178,10 +2303,19 @@ async function addEmployer(){
   loadFixedIncomesList();
 }
 
-function openEmployerModal(id,name,noTax){
+function openEmployerModal(id,name,noTax,wageTaxRate,tipTaxRate){
   sv('ee-id',id);
   sv('ee-name',name||'');
   $('ee-no-tax').checked=!!noTax;
+  sv('ee-wage-tax-rate',wageTaxRate!=null?wageTaxRate:'');
+  sv('ee-tip-tax-rate',tipTaxRate!=null?tipTaxRate:'');
+  const taxConfig=$('ee-tax-config');
+  if(taxConfig){
+    const hasTaxRates=wageTaxRate!=null||tipTaxRate!=null;
+    taxConfig.style.display=hasTaxRates?'':'none';
+    const taxToggle=$('ee-tax-toggle');
+    if(taxToggle)taxToggle.textContent=hasTaxRates?'⚙ Hide Tax Rate Config':'⚙ Configure Custom Tax Rates';
+  }
   syncNoTaxIndicators();
   $('employer-edit-modal').classList.add('open');
   setTimeout(()=>{const input=$('ee-name');if(input){input.focus();input.select();}},0);
@@ -2191,7 +2325,11 @@ function closeEmployerModal(){
   $('employer-edit-modal').classList.remove('open');
   sv('ee-id','');
   sv('ee-name','');
+  sv('ee-wage-tax-rate','');
+  sv('ee-tip-tax-rate','');
   $('ee-no-tax').checked=false;
+  const taxConfig=$('ee-tax-config');if(taxConfig)taxConfig.style.display='none';
+  const taxToggle=$('ee-tax-toggle');if(taxToggle)taxToggle.textContent='⚙ Configure Custom Tax Rates';
   syncNoTaxIndicators();
 }
 
@@ -2199,8 +2337,12 @@ async function saveEmployerEdit(){
   const id=gv('ee-id');
   const name=gv('ee-name').trim();
   const no_tax=$('ee-no-tax').checked;
+  const wageRateStr=gv('ee-wage-tax-rate');
+  const tipRateStr=gv('ee-tip-tax-rate');
+  const wage_tax_rate=wageRateStr!==''?parseFloat(wageRateStr):null;
+  const tip_tax_rate=tipRateStr!==''?parseFloat(tipRateStr):null;
   if(!name){toast('Employer name is required','error');return}
-  const res=await fetch('/api/employers/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,no_tax})});
+  const res=await fetch('/api/employers/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,no_tax,wage_tax_rate,tip_tax_rate})});
   if(!res.ok){const d=await res.json();toast(d.error||'Failed to update employer','error');return}
   closeEmployerModal();
   toast('Employer updated','success');
@@ -2227,11 +2369,11 @@ $('employer-edit-modal').addEventListener('click',function(e){if(e.target===this
 
 async function addJob(){
   const employerValue=gv('nj-employer');
-  const body={name:gv('nj-name'),employer_id:employerValue===''?null:parseInt(employerValue,10),default_rate:parseFloat(gv('nj-rate'))||0,color:gv('nj-color'),tip_payment:gv('nj-tip-payment')||'cash',tip_calc_round:$('nj-tip-calc-round').checked};
+  const body={name:gv('nj-name'),employer_id:employerValue===''?null:parseInt(employerValue,10),default_rate:parseFloat(gv('nj-rate'))||0,color:gv('nj-color'),tip_payment:gv('nj-tip-payment')||'cash',tip_calc_round:$('nj-tip-calc-round').checked,pay_period:gv('nj-pay-period')||'global'};
   if(!body.name){toast('Enter job name','error');return}
   const res=await fetch('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(!res.ok){const d=await res.json();toast(d.error||'Failed to add job','error');return}
-  sv('nj-name','');sv('nj-employer','');sv('nj-rate','');$('nj-tip-calc-round').checked=false;toast('Job added','success');loadJobsList();loadJobs();
+  sv('nj-name','');sv('nj-employer','');sv('nj-rate','');$('nj-tip-calc-round').checked=false;sv('nj-pay-period','global');toast('Job added','success');loadJobsList();loadJobs();
 }
 
 async function editJob(id){
@@ -2242,6 +2384,7 @@ async function editJob(id){
   $('ej-color').value=j.color||'#f5a623';
   sv('ej-employer',j.employer_id||'');
   setDecimalValue('ej-ot-threshold',j.overtime_threshold||40);setDecimalValue('ej-ot-multiplier',j.overtime_multiplier||1.5);$('ej-tip-payment').value=j.tip_payment||'cash';$('ej-tip-calc-round').checked=Boolean(j.tip_calc_round);
+  sv('ej-pay-period',j.pay_period||'global');
   $('job-edit-modal').classList.add('open');
 }
 
@@ -2256,7 +2399,7 @@ async function saveJobEdit(){
   const id=gv('ej-id');
   const employerValue=gv('ej-employer');
   const body={name:gv('ej-name'),default_rate:parseFloat(gv('ej-rate'))||0,color:$('ej-color').value,
-    employer_id:employerValue===''?null:parseInt(employerValue,10),overtime_threshold:parseFloat(gv('ej-ot-threshold'))||40,overtime_multiplier:parseFloat(gv('ej-ot-multiplier'))||1.5,tip_payment:$('ej-tip-payment').value||'cash',tip_calc_round:$('ej-tip-calc-round').checked};
+    employer_id:employerValue===''?null:parseInt(employerValue,10),overtime_threshold:parseFloat(gv('ej-ot-threshold'))||40,overtime_multiplier:parseFloat(gv('ej-ot-multiplier'))||1.5,tip_payment:$('ej-tip-payment').value||'cash',tip_calc_round:$('ej-tip-calc-round').checked,pay_period:$('ej-pay-period').value||'global'};
   if(!body.name){toast('Job name is required','error');return}
   const res=await fetch('/api/jobs/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(!res.ok){const d=await res.json();toast(d.error||'Failed to update job','error');return}
