@@ -196,6 +196,9 @@ canvas{max-height:280px}
 .tipcalc-meta-card .label{font-size:.66rem;letter-spacing:.08em;text-transform:uppercase;font-family:var(--mono);color:var(--text-dim);margin-bottom:4px}
 .tipcalc-meta-card .value{font-family:var(--mono);font-size:1rem;font-weight:600}
 
+/* ── Page Header Split Layout ── */
+.page-header-row{display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:12px}
+
 /* ── Shortcut Help ── */
 .shortcut-overlay{position:fixed;inset:0;background:rgba(0,0,0,.8);display:none;align-items:center;justify-content:center;z-index:300}
 .shortcut-overlay.open{display:flex}
@@ -241,6 +244,7 @@ canvas{max-height:280px}
   .btn{min-height:44px}
   td,th{padding:8px 10px}
   .page-header[style*="justify-content:space-between"]{flex-direction:column;align-items:flex-start}
+  .page-header-row{flex-direction:column;align-items:flex-start}
 }
 
 @media(max-width:900px){
@@ -264,7 +268,7 @@ canvas{max-height:280px}
   .filter-btn{flex:1;text-align:center}
   .chart-header{flex-direction:column;align-items:flex-start}
   .topbar-user{display:none}
-  .page-header{flex-direction:column!important;align-items:flex-start!important}
+  .page-header-row{flex-direction:column;align-items:flex-start}
   canvas{max-height:200px}
   .shortcut-box{padding:20px}
   .settings-tabs{width:100%}
@@ -387,7 +391,7 @@ canvas{max-height:280px}
 
     <!-- ── DASHBOARD ── -->
     <div class="view active" id="view-dashboard">
-      <div class="page-header" style="display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:12px">
+      <div class="page-header page-header-row">
         <div><h1 class="page-title">Dashboard</h1><p class="page-sub">Your earnings at a glance</p></div>
         <div class="filter-toggle" id="dash-filter"><button class="filter-btn" onclick="setDashFilter(this,'')" data-uid="">All Shifts</button><button class="filter-btn active" onclick="setDashFilter(this,'mine')" data-uid="mine">My Shifts</button></div>
       </div>
@@ -431,7 +435,7 @@ canvas{max-height:280px}
 
     <!-- ── HISTORY ── -->
     <div class="view" id="view-history">
-      <div class="page-header" style="display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:12px">
+      <div class="page-header page-header-row">
         <div><h1 class="page-title">Shift History</h1><p class="page-sub">All recorded shifts</p></div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <div class="filter-toggle"><button class="filter-btn" onclick="setHistFilter(this,'')" data-uid="">All</button><button class="filter-btn active" onclick="setHistFilter(this,'mine')" data-uid="mine">Mine</button></div>
@@ -572,7 +576,7 @@ canvas{max-height:280px}
               <div class="form-group"><label>Wage Tax Rate (optional)</label><input type="number" id="ne-wage-tax-rate" step="0.001" min="0" max="1" placeholder="e.g. 0.22"></div>
               <div class="form-group"><label>Tip Tax Rate (optional)</label><input type="number" id="ne-tip-tax-rate" step="0.001" min="0" max="1" placeholder="e.g. 0.153"></div>
             </div>
-            <p style="font-size:.7rem;color:var(--text-mute);font-family:var(--mono);margin-top:4px">Tip: Use Paycheck Entry (Admin tab) to derive these rates from a real paycheck.</p>
+            <p style="font-size:.7rem;color:var(--text-mute);font-family:var(--mono);margin-top:4px">Tip: Admins can use Paycheck Entry to derive these rates from a real paycheck.</p>
           </div>
           <div class="form-grid" style="margin-top:12px">
             <div class="form-group" style="justify-content:flex-end"><button class="btn btn-primary btn-sm" onclick="addEmployer()">Add Employer</button></div>
@@ -2157,7 +2161,7 @@ async function loadJobsList(){
     const employerLabel=j.employer_name?` · Employer: ${esc(j.employer_name)}${j.employer_no_tax?' (No Tax)':''}`:' · Employer: None';
     const ppLabel=j.pay_period&&j.pay_period!=='global'?` · Pay Period: ${payPeriodLabels[j.pay_period]||j.pay_period}`:'';
     return `<div class="user-card"><span class="user-dot" style="background:${j.color}"></span>
-    <div class="user-info"><strong>${esc(j.name)}</strong>${ownerLabel}<small>$${j.default_rate.toFixed(2)}/hr · OT ${j.overtime_threshold||40}h @ ${j.overtime_multiplier||1.5}x · Tips: ${j.tip_payment==='paycheck'?'Paycheck':'Cash'} · Tip Calc Save: ${j.tip_calc_round?'Round':'Truncate'}${ppLabel}${employerLabel}${j.archived?' · Archived':''}</small></div>
+    <div class="user-info"><strong>${esc(j.name)}</strong>${ownerLabel}<small>$${j.default_rate.toFixed(2)}/hr · OT ${j.overtime_threshold||40}h @ ${j.overtime_multiplier||1.5}x · Tips: ${j.tip_payment==='paycheck'?'Paycheck':'Cash'} · Tip Calc Save: ${j.tip_calc_round?'Round':'Truncate'}${employerLabel}${ppLabel}${j.archived?' · Archived':''}</small></div>
     <div style="display:flex;gap:6px">
       ${!j.archived&&isOwner?`<button class="btn btn-ghost btn-sm" onclick="editJob(${j.id})">Edit</button><button class="btn btn-danger btn-sm" onclick="deleteJob(${j.id},'${j.name.replace(/'/g,"\\'")}')">Delete</button>`:'<small style="opacity:.5">'+(j.archived?'Archived':'Read-only')+'</small>'}
     </div></div>`;
