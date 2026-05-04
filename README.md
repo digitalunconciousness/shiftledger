@@ -148,3 +148,9 @@ Press `?` in the app to open the shortcuts overlay at any time.
 - **PDF**: PDFKit
 - **Frontend**: Vanilla JS + Chart.js (PWA)
 - **Fonts**: IBM Plex Mono + Syne (Google Fonts)
+
+---
+
+## Project Management
+
+See [PROJECT_MANAGEMENT.md](PROJECT_MANAGEMENT.md) for architecture constraints, active issues, and deployment info.

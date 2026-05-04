@@ -633,9 +633,11 @@ List all presets and current tax metadata.
 
 Filing statuses available: `Single`, `Head of Household`, `Married Filing Jointly`.
 
-### `POST /api/tax-profiles/apply/:profileId` _(admin only)_
+### `POST /api/tax-profiles/apply/:profileId`
 
-Apply a preset to `tax_config`, overwriting Federal, State, Social Security, and Medicare rates.
+Apply a preset to `tax_config`. Behavior differs by role:
+- **Admin**: overwrites the global (system-default) `tax_config` entries for Federal, State, Social Security, and Medicare rates.
+- **Regular user**: upserts per-user `tax_config` entries, leaving other users' configs untouched.
 
 **Response:** `{ "success": true, "profile": "single_50k", "applied": { "federal": "updated", ... } }`
 

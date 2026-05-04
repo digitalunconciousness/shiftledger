@@ -390,6 +390,8 @@ migrate();
 // ── User Filter Helpers ───────────────────────────────────────────────────────
 
 // Returns all user IDs visible to the given user: their own plus any household members.
+// Called by: resolveUserFilter(), GET /api/households/:id/members,
+//   GET /api/households/:id/invitations, GET /api/audit-log, GET /api/templates
 function getVisibleUserIds(userId) {
   const rows = db.prepare(`
     SELECT DISTINCT hm2.user_id
@@ -404,6 +406,7 @@ function getVisibleUserIds(userId) {
 // Returns an array of user IDs to filter by, or null to show all users' data.
 // Admins can pass user_id=all (all data) or user_id=<id> (specific user).
 // Non-admins: pass user_id=<own_id> for strictly personal data; omit for self + household.
+// Called by: GET /api/shifts, GET /api/paycheck-estimate, GET /api/goals/history
 function resolveUserFilter(req) {
   const param = req.query.user_id;
   if (req.user && req.user.is_admin) {
@@ -477,6 +480,8 @@ function hashPassword(password) {
   });
 }
 
+// Verifies a plaintext password against a stored salt:hash string using scrypt.
+// Called by: POST /api/auth/login, POST /api/auth/change-password, isPasswordInHistory()
 function verifyPassword(password, hash) {
   return new Promise((resolve, reject) => {
     const [salt, key] = hash.split(':');
@@ -525,7 +530,8 @@ function getUserCount() {
   return db.prepare('SELECT COUNT(*) as c FROM users').get().c;
 }
 
-// Check if a plaintext password matches any of the last 5 stored hashes for a user
+// Check if a plaintext password matches any of the last 5 stored hashes for a user.
+// Called by: POST /api/auth/change-password, POST /api/users/:id/reset-password
 async function isPasswordInHistory(userId, plaintext) {
   const history = db.prepare('SELECT password_hash FROM password_history WHERE user_id = ? ORDER BY created_at DESC LIMIT 5').all(userId);
   for (const h of history) {
@@ -764,11 +770,15 @@ function validate(schema) {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 const fmt = (d) => d.toISOString().split('T')[0];
 
+// Reads the configured pay-week start day from the meta table (0=Sun … 6=Sat, default 1=Mon).
+// Called by: getPeriodBounds(), GET /api/paycheck-estimate
 function getPayWeekStartDay() {
   const row = db.prepare("SELECT value FROM meta WHERE key = 'pay_week_start_day'").get();
   return row ? parseInt(row.value, 10) : 1; // default Monday (1)
 }
 
+// Computes current and previous period date boundaries (week, biweek, month, YTD).
+// Called by: GET /api/summary, GET /api/overtime, GET /api/tax-estimate
 function getPeriodBounds() {
   const now = new Date();
   const startDay = getPayWeekStartDay(); // 0=Sun, 1=Mon, ..., 6=Sat

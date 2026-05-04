@@ -1,38 +1,45 @@
-# Project Management
+# ShiftLedger — Project Management
 
-## Project Board
+## Current Status
 
-### Purpose of the Project Board
-- Provide a visual overview of the project status and tasks.
+- **Database schema**: v17 (migrations run at startup)
+- **Backend**: `server.js` — monolithic Express app, ~3000+ lines
+- **Frontend**: Vanilla JS PWA (`public/index.html`)
+- **Mobile**: React Native / Expo (`mobile/`) — basic shift CRUD only; see [issues/mobile-app-feature-gap.md](issues/mobile-app-feature-gap.md)
 
-### Columns
-1. **Backlog**: Ideas and tasks that need to be addressed.
-2. **In Progress**: Tasks currently being worked on.
-3. **Review**: Completed tasks for review.
-4. **Done**: Finished tasks.
+## Active Issues
 
-### Managing the Board
-- Regularly update the board to reflect the current status of tasks.
-- Use labels to categorize tasks based on priority or type.
+See the [`issues/`](issues/) folder for tracked work items:
+- [`issues/mobile-app-feature-gap.md`](issues/mobile-app-feature-gap.md) — mobile app is missing Jobs, Templates, Goals, Tax, and Analytics features
+- [`issues/mobile-site-upgrades.md`](issues/mobile-site-upgrades.md) — mobile web UX improvements
+- [`issues/1`](issues/1) — issue tracker root
 
+## Key Architecture Constraints
 
-## Sprint Planning
+- Do **not** split `server.js` into separate files unless explicitly requested
+- Do **not** add npm packages without approval
+- Do **not** add TypeScript, build tools, or frontend frameworks
+- New DB migrations go in the `migrate()` array as the next entry (currently v17)
+- All inputs must be validated with Zod before hitting the DB
+- Always scope queries with `resolveUserFilter()` + `appendUserFilter()`
 
-### Definition of a Sprint
-- A sprint is a set period during which specific work has to be completed and made ready for review.
+## Deployment Target
 
-### Planning Steps
-1. **Select Backlog Items**: Choose the most important tasks from the backlog.
-2. **Define Sprint Goal**: Clearly establish what the sprint aims to achieve.
-3. **Estimate Effort**: Estimate the effort required for each task to ensure the sprint is realistic.
-4. **Assign Tasks**: Distribute tasks among team members based on their strengths and availability.
+- Proxmox LXC (Debian 12, 1 core, 512MB RAM, 4GB disk)
+- Exposed via Cloudflare Tunnel
+- Managed by systemd (`shiftledger.service`)
+- Daily backups via `backup.sh` cron job
 
-### Duration
-- Sprints typically last 1 to 4 weeks, depending on the project's needs.
+## Tech Stack Summary
 
-### Review and Retrospective
-- At the end of each sprint, hold a review meeting to assess what was completed.
-- Conduct a retrospective to discuss what went well and what could be improved.
-
-## Conclusion
-Regular updates to the project management guidelines will enhance our planning efficiency and success on the sprint objectives.
+| Layer | Technology |
+|---|---|
+| Runtime | Node.js 20 |
+| Backend | Express.js (monolithic `server.js`) |
+| Database | SQLite via `better-sqlite3` (WAL mode) |
+| Validation | Zod |
+| Logging | Pino |
+| PDF Export | PDFKit |
+| Frontend | Vanilla JS + Chart.js (CDN) |
+| Auth | scrypt passwords + signed session cookies / Bearer tokens |
+| Mobile | React Native (Expo 50) + Zustand + Axios |
