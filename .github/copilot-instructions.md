@@ -36,7 +36,7 @@ node server.js
 # Visit http://localhost:3000 — first visit creates the admin account
 ```
 
-There is no build step. The server runs directly from `server.js`.
+There is no build step. The server runs directly from `server.js`. There are no automated tests — manually verify changes by running the server and exercising the affected feature.
 
 ### Environment Variables
 
@@ -46,14 +46,10 @@ There is no build step. The server runs directly from `server.js`.
 | `DB_PATH` | `./shifts.db` (dev) | SQLite database path |
 | `SESSION_SECRET` | Random (generated) | Cookie signing secret |
 | `LOG_LEVEL` | `info` | Pino log level |
-| `OT_THRESHOLD` | `40` | Default weekly overtime threshold (hrs) |
-| `OT_MULTIPLIER` | `1.5` | Overtime rate multiplier |
-| `TAX_RATE_WAGES` | `0.22` | Estimated wage tax rate |
-| `TAX_RATE_TIPS` | `0.153` | Estimated tip tax rate |
-
-### No Formal Test Suite
-
-There are no automated tests. When making changes, manually verify by running the server and exercising the affected feature. Validate Zod schemas and SQL queries directly in the code before finalizing changes.
+| `OT_THRESHOLD` | `40` | Fallback weekly overtime threshold (hrs); per-job config takes precedence |
+| `OT_MULTIPLIER` | `1.5` | Fallback overtime rate multiplier |
+| `TAX_RATE_WAGES` | `0.22` | Fallback wage tax rate; per-user `tax_config` table takes precedence |
+| `TAX_RATE_TIPS` | `0.153` | Fallback tip tax rate |
 
 ---
 
@@ -61,23 +57,63 @@ There are no automated tests. When making changes, manually verify by running th
 
 ### Backend (`server.js`)
 
-- **Monolithic**: All routes, middleware, and logic live in a single `server.js` file. Keep this pattern — do not split into separate modules unless specifically asked.
-- **Middleware**: `authMiddleware` enforces session auth on all non-public routes. `adminOnly` restricts admin endpoints. Always apply the correct middleware when adding new routes.
-- **Zod Validation**: All route handlers that accept a request body **must** validate with a Zod schema before touching the database. Define schemas near the top of the file with existing schemas.
-- **SQL Queries**: Use `better-sqlite3` prepared statements (`db.prepare(...).get()`, `.all()`, `.run()`). Never use string interpolation to build SQL — always use `?` placeholders.
-- **User Scoping**: Every query that reads or writes user data **must** filter by `user_id`. Never expose one user's data to another.
-- **Database Migrations**: New schema changes go in the `migrate()` function as a new versioned migration. Increment the migration array and `setDbVersion()` accordingly.
-- **Soft Deletes**: Shifts use `deleted_at` for soft-delete. Always filter `WHERE deleted_at IS NULL` when querying active shifts.
-- **Logging**: Use the `logger` (Pino) instance for all server-side logging. Use `logger.info()`, `logger.warn()`, `logger.error()`. Do not use `console.log`.
-- **Error Responses**: Return `{ error: 'message' }` JSON with appropriate HTTP status codes (400 for validation, 401 for auth, 403 for permission, 404 for not found, 500 for server errors).
+`server.js` is 3000+ lines. All routes, middleware, helpers, and DB logic live here intentionally — do not split unless explicitly asked. The file is organized top-to-bottom: DB init → migrations → helpers → middleware → Zod schemas → routes.
+
+**Route middleware order** — always follow this signature pattern:
+```js
+app.METHOD('/api/path', authMiddleware, adminOnly?, rateLimiter, validate(Schema)?, handler)
+```
+
+**After `validate(Schema)` middleware**, use `req.validated` (not `req.body`) — the schema parse result with defaults applied is stored there.
+
+**User scoping in queries** — use the two helpers for every read endpoint:
+```js
+const filterUser = resolveUserFilter(req); // null = all, array = specific user IDs (includes household members)
+let sql = 'SELECT * FROM table WHERE deleted_at IS NULL';
+const params = [];
+sql = appendUserFilter(sql, params, filterUser); // mutates params array
+const rows = db.prepare(sql).all(...params);
+```
+
+**Rate limiters** — apply the appropriate named limiter:
+- `apiRateLimit` — applied globally to all `/api/*` routes
+- `authRateLimit` — login, logout, setup, refresh (20 req/15 min)
+- `passwordChangeRateLimit` — password change/reset (5 req/15 min)
+- `profileRateLimit` — user/employer/job/settings endpoints (60 req/15 min)
+- `householdRateLimit` — household mutation endpoints (30 req/15 min)
+
+**Database migrations** — currently at **v17**. Add new migrations as the next array entry; `migrate()` runs outstanding entries in a transaction at startup.
+
+**SQLite booleans** — stored as `INTEGER` (0/1). Use `!!row.field` when reading, `value ? 1 : 0` when writing.
+
+**Soft Deletes** — shifts use `deleted_at`. Always filter `WHERE deleted_at IS NULL` for active shifts.
+
+**500 errors** — use `internalError(res, err)` (logs + hides details in production), not raw `res.status(500)`.
+
+**Date formatting** — use `fmt(dateObject)` to produce `YYYY-MM-DD` strings for SQL. Use `getPeriodBounds()` to get pre-computed week/month/YTD date ranges.
+
+**First-run flow** — when the `users` table is empty, `authMiddleware` sets `req.user = null` and calls `next()` (allows the `/api/auth/setup` endpoint to work unauthenticated).
+
+**Logging**: Use `logger.info/warn/error()`. Never `console.log`.
+
+**Error Responses**: `{ error: 'message' }` with: 400 validation, 401 unauthenticated, 403 non-admin, 404 not found, 500 server error.
 
 ### Frontend (`public/`)
 
-- **Vanilla JS only**: No frontend frameworks or bundlers. All logic is inline in `index.html` script tags or separate `.js` files in `public/`.
-- **No external JS imports**: Do not add new CDN dependencies without strong justification. Chart.js and Google Fonts are already loaded.
-- **CSS Variables**: Use existing CSS custom properties (`--bg`, `--surface`, `--accent`, etc.) for all styling. Do not hardcode colors.
-- **Theme Support**: All new UI elements must respect both dark and light themes via the existing CSS variable system.
-- **PWA**: If adding new static assets, update the service worker cache list in `public/sw.js`.
+- **Vanilla JS only**: No frontend frameworks or bundlers. All UI logic is in `public/index.html` inline `<script>` blocks.
+- **No external JS imports**: Chart.js (via cdnjs) and Google Fonts are already loaded — do not add more CDN dependencies.
+- **CSS Variables**: Use existing custom properties (`--bg`, `--surface`, `--accent`, etc.). Do not hardcode colors.
+- **Theme Support**: All new UI must work in both dark and light themes via the CSS variable system.
+- **PWA**: If adding new static assets, add them to the cache list in `public/sw.js`.
+- **CSP constraint**: `unsafe-inline` is required for inline scripts/styles (see comment in security headers middleware). Do not move to external files without updating the CSP.
+
+### Mobile App (`mobile/`)
+
+React Native (Expo) app targeting the same backend API. Uses:
+- **Zustand** for state (`mobile/app/store/`) — `authStore` (JWT tokens, login/logout) and `shiftStore` (shifts + jobs CRUD)
+- **Axios** via `mobile/app/api/client.js` — all API calls go through this single client which reads the Bearer token from `AsyncStorage`
+- **Auth**: Bearer token (not cookie) — `Authorization: Bearer <token>` header on every request
+- The mobile app shares all `/api/*` endpoints with the web frontend
 
 ---
 
@@ -96,13 +132,16 @@ There are no automated tests. When making changes, manually verify by running th
 
 ## Domain Concepts
 
-- **Shift**: One work session with `date`, `hourly_rate`, `hours_worked`, tip mode (`total` or `per_hour`), `tip_input`, computed `total_tips`, `wage_total`, and `grand_total`.
-- **Job**: A named employer/client that shifts are assigned to. Each user can have multiple jobs.
-- **Template**: A saved shift configuration (rate, hours, job) for quick re-use.
-- **Goal**: A weekly or monthly income target with a tracked progress bar.
-- **Overtime**: Configurable per-job weekly hour threshold with a rate multiplier.
-- **Tax Estimation**: YTD estimated tax calculated from `TAX_RATE_WAGES × wages + TAX_RATE_TIPS × tips`.
-- **Soft Delete**: Shifts are not hard-deleted — `deleted_at` is set and an undo window is provided.
+- **Shift**: One work session — `date`, `hourly_rate`, `hours_worked`, `tip_mode` (`total`|`per_hour`), `tip_input`, computed `total_tips`, `wage_total`, `grand_total`. Soft-deleted via `deleted_at`.
+- **Job**: Named employer/client; per-job `overtime_threshold`, `overtime_multiplier`, `tip_payment` (`cash`|`paycheck`), optional `employer_id`.
+- **Employer**: Company-level record; `no_tax` flag suppresses tax estimation for linked jobs.
+- **Template**: Saved shift config (rate, hours, job) for quick re-use.
+- **Goal**: Weekly or monthly income target with progress tracking.
+- **Fixed Income**: Recurring non-shift income (salary, etc.) with flexible recurrence (`weekly`, `biweekly`, `semimonthly`, `monthly`, `custom`). Counted via `countFixedIncomeOccurrences()` for period summaries.
+- **Household**: Group of users who can see each other's shifts. `getVisibleUserIds(userId)` returns self + all household co-members.
+- **Tax Config**: Per-user table of named tax line items (federal, state, SS, medicare, tip tax) with `rate` and `flat_amount`. Falls back to env var defaults when no user-specific rows exist.
+- **Paycheck**: Real paycheck record for reconciling estimated vs actual withholding.
+- **Audit Log**: Admin-visible log of user management actions (password resets, role changes, etc.).
 
 ---
 
@@ -115,3 +154,5 @@ There are no automated tests. When making changes, manually verify by running th
 - Do not hardcode user IDs, ports, or file paths — use environment variables and existing constants.
 - Do not use `console.log` — use the `logger` instance.
 - Do not write raw SQL strings with user-supplied data — always use prepared statements.
+- Do not read from `req.body` after a `validate()` middleware — use `req.validated` instead.
+- Do not query user-owned data without calling `resolveUserFilter` + `appendUserFilter`.
