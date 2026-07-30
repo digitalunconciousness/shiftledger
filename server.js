@@ -373,6 +373,23 @@ function migrate() {
       `);
       db.exec('CREATE INDEX IF NOT EXISTS idx_fixed_incomes_user_archived ON fixed_incomes(user_id, archived)');
     },
+    // v18: per-job pay period override
+    () => {
+      const jobCols = db.prepare('PRAGMA table_info(jobs)').all().map(c => c.name);
+      if (!jobCols.includes('pay_period')) {
+        db.exec("ALTER TABLE jobs ADD COLUMN pay_period TEXT NOT NULL DEFAULT 'global'");
+      }
+    },
+    // v19: per-employer custom tax rates (nullable, NULL = use global)
+    () => {
+      const empCols = db.prepare('PRAGMA table_info(employers)').all().map(c => c.name);
+      if (!empCols.includes('wage_tax_rate')) {
+        db.exec('ALTER TABLE employers ADD COLUMN wage_tax_rate REAL');
+      }
+      if (!empCols.includes('tip_tax_rate')) {
+        db.exec('ALTER TABLE employers ADD COLUMN tip_tax_rate REAL');
+      }
+    },
   ];
 
   const tx = db.transaction(() => {
@@ -658,11 +675,14 @@ const JobSchema = z.object({
   tip_payment: z.enum(['cash', 'paycheck']).optional().default('cash'),
   employer_id: z.number().int().nullable().optional().default(null),
   tip_calc_round: z.boolean().optional().default(false),
+  pay_period: z.enum(['global', 'weekly', 'biweekly', 'semimonthly', 'monthly']).optional().default('global'),
 });
 
 const EmployerSchema = z.object({
   name: z.string().min(1).max(100),
   no_tax: z.boolean().optional().default(false),
+  wage_tax_rate: z.number().min(0).max(1).nullable().optional().default(null),
+  tip_tax_rate: z.number().min(0).max(1).nullable().optional().default(null),
 });
 
 const FixedIncomeSchema = z.object({
@@ -1585,10 +1605,10 @@ app.get('/api/employers', authMiddleware, profileRateLimit, (req, res) => {
 app.post('/api/employers', authMiddleware, profileRateLimit, validate(EmployerSchema), (req, res) => {
   try {
     if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
-    const { name, no_tax } = req.validated;
-    const result = db.prepare('INSERT INTO employers (user_id, name, no_tax) VALUES (?,?,?)')
-      .run(req.user.id, name, no_tax ? 1 : 0);
-    res.status(201).json({ id: result.lastInsertRowid, user_id: req.user.id, name, no_tax: no_tax ? 1 : 0, archived: 0 });
+    const { name, no_tax, wage_tax_rate, tip_tax_rate } = req.validated;
+    const result = db.prepare('INSERT INTO employers (user_id, name, no_tax, wage_tax_rate, tip_tax_rate) VALUES (?,?,?,?,?)')
+      .run(req.user.id, name, no_tax ? 1 : 0, wage_tax_rate ?? null, tip_tax_rate ?? null);
+    res.status(201).json({ id: result.lastInsertRowid, user_id: req.user.id, name, no_tax: no_tax ? 1 : 0, wage_tax_rate: wage_tax_rate ?? null, tip_tax_rate: tip_tax_rate ?? null, archived: 0 });
   } catch (e) {
     internalError(res, e);
   }
@@ -1600,8 +1620,9 @@ app.put('/api/employers/:id', authMiddleware, profileRateLimit, validate(Employe
     const employer = db.prepare('SELECT * FROM employers WHERE id = ?').get(req.params.id);
     if (!employer || employer.archived) return res.status(404).json({ error: 'Employer not found' });
     if (employer.user_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Not your employer' });
-    const { name, no_tax } = req.validated;
-    db.prepare('UPDATE employers SET name = ?, no_tax = ? WHERE id = ?').run(name, no_tax ? 1 : 0, req.params.id);
+    const { name, no_tax, wage_tax_rate, tip_tax_rate } = req.validated;
+    db.prepare('UPDATE employers SET name = ?, no_tax = ?, wage_tax_rate = ?, tip_tax_rate = ? WHERE id = ?')
+      .run(name, no_tax ? 1 : 0, wage_tax_rate ?? null, tip_tax_rate ?? null, req.params.id);
     res.json({ success: true });
   } catch (e) {
     internalError(res, e);
@@ -1743,13 +1764,13 @@ app.get('/api/jobs', authMiddleware, profileRateLimit, (req, res) => {
 
 app.post('/api/jobs', authMiddleware, profileRateLimit, validate(JobSchema), (req, res) => {
   try {
-    const { name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, employer_id, tip_calc_round } = req.validated;
+    const { name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, employer_id, tip_calc_round, pay_period } = req.validated;
     const userId = req.user ? req.user.id : null;
     const employerValidation = validateEmployerForJobAssignment(employer_id, userId);
     if (employerValidation) return res.status(employerValidation.status).json({ error: employerValidation.error });
-    const result = db.prepare('INSERT INTO jobs (name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, employer_id, tip_calc_round, user_id) VALUES (?,?,?,?,?,?,?,?,?)')
-      .run(name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, employer_id, tip_calc_round ? 1 : 0, userId);
-    res.json({ id: result.lastInsertRowid, name, default_rate, color, tip_payment, employer_id, tip_calc_round: !!tip_calc_round, user_id: userId });
+    const result = db.prepare('INSERT INTO jobs (name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, employer_id, tip_calc_round, pay_period, user_id) VALUES (?,?,?,?,?,?,?,?,?,?)')
+      .run(name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, employer_id, tip_calc_round ? 1 : 0, pay_period, userId);
+    res.json({ id: result.lastInsertRowid, name, default_rate, color, tip_payment, employer_id, tip_calc_round: !!tip_calc_round, pay_period, user_id: userId });
   } catch (e) {
     internalError(res, e);
   }
@@ -1766,11 +1787,11 @@ app.put('/api/jobs/:id', authMiddleware, profileRateLimit, validate(JobSchema), 
     if (job.user_id === null && !req.user.is_admin) {
       return res.status(403).json({ error: 'Only admins can edit global jobs' });
     }
-    const { name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, employer_id, tip_calc_round } = req.validated;
+    const { name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, employer_id, tip_calc_round, pay_period } = req.validated;
     const employerValidation = validateEmployerForJobAssignment(employer_id, job.user_id);
     if (employerValidation) return res.status(employerValidation.status).json({ error: employerValidation.error });
-    db.prepare('UPDATE jobs SET name=?, default_rate=?, color=?, overtime_threshold=?, overtime_multiplier=?, tip_payment=?, employer_id=?, tip_calc_round=? WHERE id=?')
-      .run(name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, employer_id, tip_calc_round ? 1 : 0, req.params.id);
+    db.prepare('UPDATE jobs SET name=?, default_rate=?, color=?, overtime_threshold=?, overtime_multiplier=?, tip_payment=?, employer_id=?, tip_calc_round=?, pay_period=? WHERE id=?')
+      .run(name, default_rate, color, overtime_threshold, overtime_multiplier, tip_payment, employer_id, tip_calc_round ? 1 : 0, pay_period, req.params.id);
     res.json({ success: true });
   } catch (e) {
     internalError(res, e);
